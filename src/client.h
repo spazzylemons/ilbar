@@ -21,9 +21,9 @@ typedef struct {
     /** Current layer surface object */
     struct zwlr_layer_surface_v1 *layer_surface;
     /** Current pointer object */
-    struct wl_pointer            *pointer;
+    struct wl_pointer *pointer;
     /** Current touch object */
-    struct wl_touch              *touch;
+    struct wl_touch *touch;
     /** When set to true, events stop being dispatched. */
     bool should_close;
     /** The current dimensions of the surface. */
