@@ -33,7 +33,7 @@ typedef struct {
 } Client;
 
 /** Create a new client object. */
-Client *client_init(void);
+Client *client_init(const char *display, uint32_t height);
 /** Run the client. */
 void client_run(Client *self);
 /** Destroy the client and all related resources. */

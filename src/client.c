@@ -11,7 +11,6 @@
 #include "layer-shell.h"
 #include "util.h"
 
-#define BAR_SIZE 32
 #define NUM_INTERFACES 4
 
 /** Specification for loading an interface from the registry. */
@@ -365,7 +364,7 @@ static const struct wl_seat_listener seat_listener = {
     .name         = on_seat_name,
 };
 
-Client *client_init(void) {
+Client *client_init(const char *display, uint32_t height) {
     /* allocate client, set all values to null */
     Client *self = malloc(sizeof(Client));
     if (!self) {
@@ -374,7 +373,7 @@ Client *client_init(void) {
     }
     memset(self, 0, sizeof(Client));
 
-    self->display = wl_display_connect(NULL);
+    self->display = wl_display_connect(display);
     if (!self->display) {
         fprintf(stderr, "failed to open the current Wayland display\n");
         client_deinit(self);
@@ -460,8 +459,8 @@ Client *client_init(void) {
         ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT  |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM);
-    zwlr_layer_surface_v1_set_size(self->layer_surface, 0, BAR_SIZE);
-    zwlr_layer_surface_v1_set_exclusive_zone(self->layer_surface, BAR_SIZE);
+    zwlr_layer_surface_v1_set_size(self->layer_surface, 0, height);
+    zwlr_layer_surface_v1_set_exclusive_zone(self->layer_surface, height);
 
     wl_surface_commit(self->wl_surface);
 
