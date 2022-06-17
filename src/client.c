@@ -9,9 +9,15 @@
 
 #include "client.h"
 #include "layer-shell.h"
+#include "render.h"
 #include "util.h"
 
 #define NUM_INTERFACES 4
+
+struct {
+    uint8_t bytes[2];
+    uint16_t value;
+} endian_check = { .bytes = { 0, 1 } };
 
 /** Specification for loading an interface from the registry. */
 typedef struct {
@@ -96,7 +102,7 @@ static struct wl_buffer *draw_frame(Client *client) {
     int fd = alloc_shm(client, size);
     if (fd < 0) return NULL;
 
-    uint32_t *data =
+    unsigned char *data =
         mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (data == MAP_FAILED) {
         close(fd);
@@ -110,26 +116,24 @@ static struct wl_buffer *draw_frame(Client *client) {
         return NULL;
     }
 
+    uint32_t format = (endian_check.value == 1)
+        ? WL_SHM_FORMAT_BGRX8888
+        : WL_SHM_FORMAT_XRGB8888;
+
     struct wl_buffer *buffer = wl_shm_pool_create_buffer(
         pool,
         0,
         client->width,
         client->height,
         stride,
-        WL_SHM_FORMAT_XRGB8888);
+        format);
     wl_shm_pool_destroy(pool);
     close(fd);
     if (!buffer) {
         munmap(data, size);
         return NULL;
     }
-
-    for (uint32_t y = 0; y < client->height; ++y) {
-        for (uint32_t x = 0; x < client->width; ++x) {
-            data[y * client->width + x] = 0xffc0c0c0;
-        }
-    }
-
+    render_taskbar(client->width, client->height, data);
     munmap(data, size);
     wl_buffer_add_listener(buffer, &buffer_listener, NULL);
     return buffer;

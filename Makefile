@@ -3,7 +3,7 @@ BUILDDIR := build
 
 TARGET := $(BUILDDIR)/ilbar
 
-CFILES := $(SRCDIR)/client.c $(SRCDIR)/main.c
+CFILES := $(SRCDIR)/client.c $(SRCDIR)/main.c $(SRCDIR)/render.c
 OFILES := $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(CFILES))
 DFILES := $(OFILES:.o=.d)
 
@@ -17,9 +17,12 @@ LAYER_PROTO_H := $(BUILDDIR)/layer-shell.h
 LAYER_PROTO_C := $(BUILDDIR)/layer-shell.c
 
 CFLAGS := -g -Wall -Wextra -I$(BUILDDIR) \
+	$(shell pkg-config --cflags cairo) \
 	$(shell pkg-config --cflags wayland-client)
 
-LDFLAGS := $(shell pkg-config --libs wayland-client)
+LDFLAGS := \
+	$(shell pkg-config --libs cairo) \
+	$(shell pkg-config --libs wayland-client)
 
 $(TARGET): $(OFILES) $(XDG_PROTO_C) $(LAYER_PROTO_C)
 	$(CC) $(CFLAGS) $(OFILES) $(XDG_PROTO_C) $(LAYER_PROTO_C) -o $@ $(LDFLAGS)

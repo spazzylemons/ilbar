@@ -4,6 +4,7 @@ A simple classic taskbar for Wayland desktops.
 
 ## Build requirements
 
+- cairo
 - make
 - wayland-client
 - wayland-protocols
