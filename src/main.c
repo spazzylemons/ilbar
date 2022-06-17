@@ -53,6 +53,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     client_run(client);
-    client_deinit(client);  
+    client_deinit(client);
     return EXIT_SUCCESS;
 }
