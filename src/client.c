@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/input-event-codes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,11 +76,12 @@ static const struct wl_buffer_listener buffer_listener = {
 };
 
 static int alloc_shm(Client *client, int size) {
-    /* create shm file name using pid and client pointer to avoid collision */
+    static uint8_t counter = 0;
+    /* create shm file name using various factors to avoid collision */
     pid_t pid = getpid();
-    int n = snprintf(NULL, 0, "/ilbar-shm-%d-%p", pid, client);
+    int n = snprintf(NULL, 0, "/ilbar-shm-%d-%p-%d", pid, client, counter);
     char name[n + 1];
-    snprintf(name, n, "/ilbar-shm-%d-%p", pid, client);
+    snprintf(name, n, "/ilbar-shm-%d-%p-%d", pid, client, counter++);
     /* open a shared memory file */
     int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0) return -1;
@@ -95,24 +97,43 @@ static int alloc_shm(Client *client, int size) {
     return fd;
 }
 
+static void update_shm(Client *client, uint32_t width, uint32_t height) {
+    uint64_t size = (uint64_t) width * (uint64_t) height * 4;
+    if (size > INT_MAX) return;
+    int new_size = size;
+    int old_size = client->width * client->height * 4;
+    if (old_size == new_size) return;
+
+    int fd = alloc_shm(client, new_size);
+    if (fd < 0) return;
+
+    unsigned char *buffer =
+        mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (buffer == MAP_FAILED) {
+        close(fd);
+        return;
+    }
+
+    if (client->buffer) {
+        munmap(client->buffer, old_size);
+    }
+    client->buffer = buffer;
+
+    if (client->buffer_fd >= 0) {
+        close(client->buffer_fd);
+    }
+    client->buffer_fd = fd;
+    client->width = width;
+    client->height = height;
+}
+
 static struct wl_buffer *draw_frame(Client *client) {
     int stride = client->width * 4;
     int size = stride * client->height;
 
-    int fd = alloc_shm(client, size);
-    if (fd < 0) return NULL;
-
-    unsigned char *data =
-        mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (data == MAP_FAILED) {
-        close(fd);
-        return NULL;
-    }
-
-    struct wl_shm_pool *pool = wl_shm_create_pool(client->shm, fd, size);
+    struct wl_shm_pool *pool =
+        wl_shm_create_pool(client->shm, client->buffer_fd, size);
     if (!pool) {
-        munmap(data, size);
-        close(fd);
         return NULL;
     }
 
@@ -128,13 +149,10 @@ static struct wl_buffer *draw_frame(Client *client) {
         stride,
         format);
     wl_shm_pool_destroy(pool);
-    close(fd);
     if (!buffer) {
-        munmap(data, size);
         return NULL;
     }
-    render_taskbar(client->width, client->height, data);
-    munmap(data, size);
+    render_taskbar(client->width, client->height, client->buffer);
     wl_buffer_add_listener(buffer, &buffer_listener, NULL);
     return buffer;
 }
@@ -149,12 +167,13 @@ static void on_surface_configure(
     Client *client = data;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
 
-    client->width = width;
-    client->height = height;
-    struct wl_buffer *buffer = draw_frame(client);
-    if (buffer) {
-        wl_surface_attach(client->wl_surface, buffer, 0, 0);
-        wl_surface_commit(client->wl_surface);
+    update_shm(client, width, height);
+    if (client->buffer && client->buffer_fd) {
+        struct wl_buffer *buffer = draw_frame(client);
+        if (buffer) {
+            wl_surface_attach(client->wl_surface, buffer, 0, 0);
+            wl_surface_commit(client->wl_surface);
+        }
     }
 }
 
@@ -376,6 +395,7 @@ Client *client_init(const char *display, uint32_t height) {
         return NULL;
     }
     memset(self, 0, sizeof(Client));
+    self->buffer_fd = -1;
 
     self->display = wl_display_connect(display);
     if (!self->display) {
@@ -478,6 +498,9 @@ void client_run(Client *self) {
 }
 
 void client_deinit(Client *self) {
+    if (self->buffer) munmap(self->buffer, self->width * self->height * 4);
+    if (self->buffer_fd >= 0) close(self->buffer_fd);
+
     if (self->pointer) wl_pointer_destroy(self->pointer);
     if (self->touch) wl_touch_destroy(self->touch);
 

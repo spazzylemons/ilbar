@@ -24,6 +24,10 @@ typedef struct {
     struct wl_pointer *pointer;
     /** Current touch object */
     struct wl_touch *touch;
+    /** The current pixel buffer, or NULL if not currently allocated. */
+    unsigned char *buffer;
+    /** The buffer file descriptor, or -1 if not currently opened. */
+    int buffer_fd;
     /** When set to true, events stop being dispatched. */
     bool should_close;
     /** The current dimensions of the surface. */
