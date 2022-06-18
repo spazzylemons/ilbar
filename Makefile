@@ -23,7 +23,7 @@ LAYER_PROTO_C := $(BUILDDIR)/layer-shell.c
 
 LOG_C := $(LIBDIR)/log.c
 
-CFLAGS := -g -Wall -Wextra -I$(BUILDDIR) -I$(LIBDIR) \
+CFLAGS := -g -Wall -Wextra -DLOG_USE_COLOR -I$(BUILDDIR) -I$(LIBDIR) \
 	$(shell pkg-config --cflags cairo) \
 	$(shell pkg-config --cflags wayland-client)
 
