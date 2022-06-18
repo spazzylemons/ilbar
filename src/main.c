@@ -4,7 +4,7 @@
 
 #include "client.h"
 
-#define DEFAULT_HEIGHT 32
+#define DEFAULT_HEIGHT 28
 
 static void print_help(const char *name) {
     printf("usage: %s [-h] [-v] [-d display] [-s size]\n", name);

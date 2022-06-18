@@ -167,9 +167,21 @@ static struct wl_buffer *draw_frame(Client *client) {
         log_warn("failed to create shm pool buffer");
         return NULL;
     }
-    render_taskbar(client->width, client->height, client->buffer);
+    render_taskbar(client);
     wl_buffer_add_listener(buffer, &buffer_listener, NULL);
     return buffer;
+}
+
+static void rerender(Client *client) {
+    if (client->buffer && client->buffer_fd) {
+        struct wl_buffer *buffer = draw_frame(client);
+        if (buffer) {
+            wl_surface_attach(client->wl_surface, buffer, 0, 0);
+            wl_surface_commit(client->wl_surface);
+            wl_surface_damage(client->wl_surface,
+                0, 0, client->width, client->height);
+        }
+    }
 }
 
 static void on_surface_configure(
@@ -183,13 +195,7 @@ static void on_surface_configure(
     zwlr_layer_surface_v1_ack_configure(surface, serial);
 
     update_shm(client, width, height);
-    if (client->buffer && client->buffer_fd) {
-        struct wl_buffer *buffer = draw_frame(client);
-        if (buffer) {
-            wl_surface_attach(client->wl_surface, buffer, 0, 0);
-            wl_surface_commit(client->wl_surface);
-        }
-    }
+    rerender(client);
 }
 
 static void on_surface_closed(
@@ -496,9 +502,12 @@ static void on_handle_state(
 ) {}
 
 static void on_handle_done(
-    void                                   *UNUSED(data),
+    void                                   *data,
     struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle)
-) {}
+) {
+    Client *client = data;
+    rerender(client);
+}
 
 static void on_handle_closed(
     void                                   *data,

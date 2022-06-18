@@ -4,7 +4,9 @@
 #include <cairo.h>
 #include <stdint.h>
 
+#include "client.h"
+
 /** Render the taskbar. Fails silently. */
-void render_taskbar(uint32_t width, uint32_t height, unsigned char *buffer);
+void render_taskbar(Client *client);
 
 #endif
