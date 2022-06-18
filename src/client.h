@@ -4,6 +4,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <wayland-util.h>
+
+/** An open toplevel window. */
+typedef struct {
+    /** Intrusive list */
+    struct wl_list link;
+    /** The window handle. */
+    struct zwlr_foreign_toplevel_handle_v1 *handle;
+    /** The last seen title as an owned copy. */
+    char *title;
+} Toplevel;
+
 /** The interface to Wayland. */
 typedef struct {
     /** Global display object */
@@ -16,6 +28,8 @@ typedef struct {
     struct zwlr_layer_shell_v1 *layer_shell;
     /** Global seat object */
     struct wl_seat *seat;
+    /** Global importer object */
+    struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
     /** Current Wayland surface object */
     struct wl_surface *wl_surface;
     /** Current layer surface object */
@@ -34,6 +48,8 @@ typedef struct {
     uint32_t width, height;
     /** The last seen position of the pointer or touch. */
     int mouse_x, mouse_y;
+    /** A list of toplevel info. */
+    struct wl_list toplevels;
 } Client;
 
 /** Create a new client object. */

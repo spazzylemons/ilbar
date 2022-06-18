@@ -12,8 +12,9 @@
 #include "layer-shell.h"
 #include "render.h"
 #include "util.h"
+#include "wlr-foreign.h"
 
-#define NUM_INTERFACES 4
+#define NUM_INTERFACES 5
 
 struct {
     uint8_t bytes[2];
@@ -387,6 +388,155 @@ static const struct wl_seat_listener seat_listener = {
     .name         = on_seat_name,
 };
 
+static Toplevel *add_toplevel(Client *client,
+    struct zwlr_foreign_toplevel_handle_v1 *handle) {
+    Toplevel *toplevel = malloc(sizeof(Toplevel));
+    if (!toplevel) return NULL;
+
+    wl_list_insert(&client->toplevels, &toplevel->link);
+    toplevel->handle = handle;
+    toplevel->title = NULL;
+
+    return toplevel;
+}
+
+static Toplevel *find_toplevel(Client *client,
+    struct zwlr_foreign_toplevel_handle_v1 *handle) {
+    Toplevel *toplevel;
+    wl_list_for_each(toplevel, &client->toplevels, link) {
+        if (toplevel->handle == handle) {
+            return toplevel;
+        }
+    }
+    return NULL;
+}
+
+static Toplevel *find_or_add_toplevel(Client *client,
+    struct zwlr_foreign_toplevel_handle_v1 *handle) {
+    Toplevel *toplevel = find_toplevel(client, handle);
+    if (toplevel) return toplevel;
+    return add_toplevel(client, handle);
+}
+
+static void free_toplevel(Toplevel *toplevel) {
+    wl_list_remove(&toplevel->link);
+    zwlr_foreign_toplevel_handle_v1_destroy(toplevel->handle);
+    free(toplevel->title);
+    free(toplevel);
+}
+
+static void free_all_toplevels(Client *client) {
+    Toplevel *toplevel, *tmp;
+    wl_list_for_each_safe(toplevel, tmp, &client->toplevels, link) {
+        free_toplevel(toplevel);
+    }
+}
+
+static void on_handle_title(
+    void                                   *data,
+    struct zwlr_foreign_toplevel_handle_v1 *handle,
+    const char                             *title
+) {
+    Client *client = data;
+    Toplevel *toplevel = find_or_add_toplevel(client, handle);
+    if (toplevel) {
+        char *title_copy = strdup(title);
+        if (title_copy) {
+            free(toplevel->title);
+            toplevel->title = title_copy;
+        }
+    }
+}
+
+static void on_handle_app_id(
+    void                                   *UNUSED(data),
+    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle),
+    const char                             *UNUSED(app_id)
+) {}
+
+static void on_handle_output_enter(
+    void                                   *UNUSED(data),
+    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle),
+    struct wl_output                       *UNUSED(output)
+) {}
+
+static void on_handle_output_exit(
+    void                                   *UNUSED(data),
+    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle),
+    struct wl_output                       *UNUSED(output)
+) {}
+
+static void on_handle_state(
+    void                                   *UNUSED(data),
+    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle),
+    struct wl_array                        *UNUSED(state)
+) {}
+
+static void on_handle_done(
+    void                                   *UNUSED(data),
+    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle)
+) {}
+
+static void on_handle_closed(
+    void                                   *data,
+    struct zwlr_foreign_toplevel_handle_v1 *handle
+) {
+    Client *client = data;
+
+    Toplevel *toplevel = find_toplevel(client, handle);
+    if (toplevel) {
+        free_toplevel(toplevel);
+    } else {
+        zwlr_foreign_toplevel_handle_v1_destroy(handle);
+    }
+}
+
+static void on_handle_parent(
+    void                                   *UNUSED(data),
+    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle),
+    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(parent)
+) {}
+
+static const struct zwlr_foreign_toplevel_handle_v1_listener
+handle_listener = {
+    .title        = on_handle_title,
+    .app_id       = on_handle_app_id,
+    .output_enter = on_handle_output_enter,
+    .output_leave = on_handle_output_exit,
+    .state        = on_handle_state,
+    .done         = on_handle_done,
+    .closed       = on_handle_closed,
+    .parent       = on_handle_parent,
+};
+
+static void on_toplevel_toplevel(
+    void                                    *data,
+    struct zwlr_foreign_toplevel_manager_v1 *UNUSED(toplevel_manager),
+    struct zwlr_foreign_toplevel_handle_v1  *handle
+) {
+    // TODO
+    Client *client = data;
+    zwlr_foreign_toplevel_handle_v1_add_listener(
+        handle, &handle_listener, client);
+    add_toplevel(client, handle);
+}
+
+static void on_toplevel_finished(
+    void                                    *data,
+    struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager
+) {
+    Client *client = data;
+    free_all_toplevels(client);
+    zwlr_foreign_toplevel_manager_v1_destroy(toplevel_manager);
+    client->toplevel_manager = NULL;
+}
+
+static const struct zwlr_foreign_toplevel_manager_v1_listener
+toplevel_listener = {
+    .toplevel = on_toplevel_toplevel,
+    .finished = on_toplevel_finished,
+};
+
 Client *client_init(const char *display, uint32_t height) {
     /* allocate client, set all values to null */
     Client *self = malloc(sizeof(Client));
@@ -396,6 +546,7 @@ Client *client_init(const char *display, uint32_t height) {
     }
     memset(self, 0, sizeof(Client));
     self->buffer_fd = -1;
+    wl_list_init(&self->toplevels);
 
     self->display = wl_display_connect(display);
     if (!self->display) {
@@ -434,6 +585,12 @@ Client *client_init(const char *display, uint32_t height) {
             .interface = &wl_seat_interface,
             .version = 7,
             .out = (void**) (void*) &self->seat,
+        },
+
+        {
+            .interface = &zwlr_foreign_toplevel_manager_v1_interface,
+            .version = 3,
+            .out = (void**) (void*) &self->toplevel_manager,
         },
     };
 
@@ -490,6 +647,9 @@ Client *client_init(const char *display, uint32_t height) {
 
     wl_seat_add_listener(self->seat, &seat_listener, self);
 
+    zwlr_foreign_toplevel_manager_v1_add_listener(
+        self->toplevel_manager, &toplevel_listener, self);
+
     return self;
 }
 
@@ -498,6 +658,8 @@ void client_run(Client *self) {
 }
 
 void client_deinit(Client *self) {
+    free_all_toplevels(self);
+
     if (self->buffer) munmap(self->buffer, self->width * self->height * 4);
     if (self->buffer_fd >= 0) close(self->buffer_fd);
 
@@ -511,6 +673,8 @@ void client_deinit(Client *self) {
     if (self->compositor) wl_compositor_destroy(self->compositor);
     if (self->layer_shell) zwlr_layer_shell_v1_destroy(self->layer_shell);
     if (self->seat) wl_seat_destroy(self->seat);
+    if (self->toplevel_manager)
+        zwlr_foreign_toplevel_manager_v1_destroy(self->toplevel_manager);
 
     if (self->display) wl_display_disconnect(self->display);
 
