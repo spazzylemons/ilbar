@@ -6,6 +6,8 @@
 
 #include <wayland-util.h>
 
+#include "config.h"
+
 /** An open toplevel window. */
 typedef struct {
     /** Intrusive list */
@@ -18,6 +20,8 @@ typedef struct {
 
 /** The interface to Wayland. */
 typedef struct {
+    /** The config settings */
+    const Config *config;
     /** Global display object */
     struct wl_display *display;
     /** Global shared memory object */
@@ -53,7 +57,7 @@ typedef struct {
 } Client;
 
 /** Create a new client object. */
-Client *client_init(const char *display, uint32_t height);
+Client *client_init(const char *display, const Config *config);
 /** Run the client. */
 void client_run(Client *self);
 /** Destroy the client and all related resources. */

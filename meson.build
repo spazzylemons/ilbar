@@ -49,6 +49,20 @@ protocols = declare_dependency(
   sources: protocols_hfiles,
 )
 
+cj_lib = custom_target(
+  'cj.c',
+  output: 'cj.o',
+  command: [
+    '/bin/sh',
+    '-c',
+    'make -C @SOURCE_ROOT@/cj && cp @SOURCE_ROOT@/cj/cj.o @OUTPUT@',
+  ],
+)
+
+cj = declare_dependency(
+  link_with: static_library('cj', cj_lib),
+)
+
 executable(
   'ilbar',
 
@@ -60,6 +74,7 @@ executable(
   ),
 
   include_directories: [
+    'cj',
     'lib',
   ],
 
@@ -67,6 +82,7 @@ executable(
     dependency('wayland-client'),
     dependency('cairo'),
     protocols,
+    cj,
   ],
 
   install: true,

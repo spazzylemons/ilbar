@@ -572,7 +572,7 @@ toplevel_listener = {
     .finished = on_toplevel_finished,
 };
 
-Client *client_init(const char *display, uint32_t height) {
+Client *client_init(const char *display, const Config *config) {
     /* allocate client, set all values to null */
     Client *self = malloc(sizeof(Client));
     if (!self) {
@@ -580,6 +580,7 @@ Client *client_init(const char *display, uint32_t height) {
         return NULL;
     }
     memset(self, 0, sizeof(Client));
+    self->config = config;
     self->buffer_fd = -1;
     wl_list_init(&self->toplevels);
 
@@ -678,8 +679,9 @@ Client *client_init(const char *display, uint32_t height) {
         ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT  |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
         ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM);
-    zwlr_layer_surface_v1_set_size(self->layer_surface, 0, height);
-    zwlr_layer_surface_v1_set_exclusive_zone(self->layer_surface, height);
+    zwlr_layer_surface_v1_set_size(self->layer_surface, 0, config->height);
+    zwlr_layer_surface_v1_set_exclusive_zone(
+        self->layer_surface, config->height);
 
     wl_surface_commit(self->wl_surface);
 
