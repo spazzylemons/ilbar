@@ -1,10 +1,13 @@
 #include "render.h"
 
 #include <limits.h>
+#include <log.h>
 
 void render_taskbar(uint32_t width, uint32_t height, unsigned char *buffer) {
-    if (width > INT_MAX || height > INT_MAX || (long long) height * 4 > INT_MAX)
+    if (width > INT_MAX || height > INT_MAX || height > INT_MAX / 4) {
+        log_warn("surface is too big to draw to");
         return;
+    }
 
     cairo_surface_t *surface = cairo_image_surface_create_for_data(
         buffer,
@@ -12,10 +15,14 @@ void render_taskbar(uint32_t width, uint32_t height, unsigned char *buffer) {
         width,
         height,
         width * 4);
-    if (!surface) return;
+    if (!surface) {
+        log_warn("failed to create image surface");
+        return;
+    }
 
     cairo_t *cr = cairo_create(surface);
     if (!cr) {
+        log_warn("failed to create cairo instance");
         cairo_surface_destroy(surface);
         return;
     }

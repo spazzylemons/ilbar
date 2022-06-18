@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/input-event-codes.h>
+#include <log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,9 @@ static void on_registry_global(
                     name,
                     spec->interface,
                     spec->version);
+            } else {
+                log_error("interface %s is available, but too old",
+                    spec->interface->name);
             }
             return;
         }
@@ -80,9 +84,10 @@ static int alloc_shm(Client *client, int size) {
     static uint8_t counter = 0;
     /* create shm file name using various factors to avoid collision */
     pid_t pid = getpid();
-    int n = snprintf(NULL, 0, "/ilbar-shm-%d-%p-%d", pid, client, counter);
-    char name[n + 1];
+    int n = snprintf(NULL, 0, "/ilbar-shm-%d-%p-%d", pid, client, counter) + 1;
+    char name[n];
     snprintf(name, n, "/ilbar-shm-%d-%p-%d", pid, client, counter++);
+    log_info("opening new shm file: %s", name);
     /* open a shared memory file */
     int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0) return -1;
@@ -100,17 +105,24 @@ static int alloc_shm(Client *client, int size) {
 
 static void update_shm(Client *client, uint32_t width, uint32_t height) {
     uint64_t size = (uint64_t) width * (uint64_t) height * 4;
-    if (size > INT_MAX) return;
+    if (size > INT_MAX) {
+        log_warn("taskbar dimensions too large");
+        return;
+    }
     int new_size = size;
     int old_size = client->width * client->height * 4;
     if (old_size == new_size) return;
 
     int fd = alloc_shm(client, new_size);
-    if (fd < 0) return;
+    if (fd < 0) {
+        log_warn("failed to open shm file");
+        return;
+    }
 
     unsigned char *buffer =
         mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (buffer == MAP_FAILED) {
+        log_warn("failed to mmap new shm");
         close(fd);
         return;
     }
@@ -135,6 +147,7 @@ static struct wl_buffer *draw_frame(Client *client) {
     struct wl_shm_pool *pool =
         wl_shm_create_pool(client->shm, client->buffer_fd, size);
     if (!pool) {
+        log_warn("failed to create shm pool");
         return NULL;
     }
 
@@ -151,6 +164,7 @@ static struct wl_buffer *draw_frame(Client *client) {
         format);
     wl_shm_pool_destroy(pool);
     if (!buffer) {
+        log_warn("failed to create shm pool buffer");
         return NULL;
     }
     render_taskbar(client->width, client->height, client->buffer);
@@ -364,6 +378,8 @@ static void on_seat_capabilities(
             if (client->pointer) wl_pointer_destroy(client->pointer);
             client->pointer = pointer;
             wl_pointer_add_listener(client->pointer, &pointer_listener, client);
+        } else {
+            log_warn("failed to obtain the pointer");
         }
     }
 
@@ -373,6 +389,8 @@ static void on_seat_capabilities(
             if (client->touch) wl_touch_destroy(client->touch);
             client->touch = touch;
             wl_touch_add_listener(client->touch, &touch_listener, client);
+        } else {
+            log_warn("failed to obtain the touch");
         }
     }
 }
@@ -391,7 +409,10 @@ static const struct wl_seat_listener seat_listener = {
 static Toplevel *add_toplevel(Client *client,
     struct zwlr_foreign_toplevel_handle_v1 *handle) {
     Toplevel *toplevel = malloc(sizeof(Toplevel));
-    if (!toplevel) return NULL;
+    if (!toplevel) {
+        log_warn("failed to allocate for a new window");
+        return NULL;
+    }
 
     wl_list_insert(&client->toplevels, &toplevel->link);
     toplevel->handle = handle;
@@ -444,6 +465,8 @@ static void on_handle_title(
         if (title_copy) {
             free(toplevel->title);
             toplevel->title = title_copy;
+        } else {
+            log_warn("failed to copy title '%s'", title);
         }
     }
 }
@@ -529,6 +552,7 @@ static void on_toplevel_finished(
     free_all_toplevels(client);
     zwlr_foreign_toplevel_manager_v1_destroy(toplevel_manager);
     client->toplevel_manager = NULL;
+    log_warn("toplevel manager closed early, functionality limited");
 }
 
 static const struct zwlr_foreign_toplevel_manager_v1_listener
@@ -541,7 +565,7 @@ Client *client_init(const char *display, uint32_t height) {
     /* allocate client, set all values to null */
     Client *self = malloc(sizeof(Client));
     if (!self) {
-        fprintf(stderr, "failed to allocate client\n");
+        log_error("failed to allocate client");
         return NULL;
     }
     memset(self, 0, sizeof(Client));
@@ -550,14 +574,14 @@ Client *client_init(const char *display, uint32_t height) {
 
     self->display = wl_display_connect(display);
     if (!self->display) {
-        fprintf(stderr, "failed to open the current Wayland display\n");
+        log_error("failed to open the Wayland display");
         client_deinit(self);
         return NULL;
     }
 
     struct wl_registry *registry = wl_display_get_registry(self->display);
     if (!registry) {
-        fprintf(stderr, "failed to get the Wayland registry\n");
+        log_error("failed to get the Wayland registry");
         client_deinit(self);
         return NULL;
     }
@@ -596,26 +620,29 @@ Client *client_init(const char *display, uint32_t height) {
 
     wl_registry_add_listener(registry, &registry_listener, &specs);
     if (wl_display_roundtrip(self->display) < 0) {
-        fprintf(stderr, "failed to perform roundtrip\n");
+        log_error("failed to perform roundtrip");
         wl_registry_destroy(registry);
         client_deinit(self);
         return NULL;
     }
 
+    bool bad_interfaces = false;
     for (int i = 0; i < NUM_INTERFACES; ++i) {
         if (!*specs[i].out) {
-            fprintf(stderr, "interface %s is unavailable or not new enough\n",
+            log_error("interface %s is unavailable or not new enough",
                 specs[i].interface->name);
-            wl_registry_destroy(registry);
-            client_deinit(self);
-            return NULL;
+            bad_interfaces = true;
         }
     }
     wl_registry_destroy(registry);
+    if (bad_interfaces) {
+        client_deinit(self);
+        return NULL;
+    }
 
     self->wl_surface = wl_compositor_create_surface(self->compositor);
     if (!self->wl_surface) {
-        fprintf(stderr, "failed to create Wayland surface\n");
+        log_error("failed to create Wayland surface");
         client_deinit(self);
         return NULL;
     }
@@ -627,7 +654,7 @@ Client *client_init(const char *display, uint32_t height) {
         ZWLR_LAYER_SHELL_V1_LAYER_TOP,
         "ilbar");
     if (!self->layer_surface) {
-        fprintf(stderr, "failed to create layer surface\n");
+        log_error("failed to create layer surface");
         client_deinit(self);
         return NULL;
     }
