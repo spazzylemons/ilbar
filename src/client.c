@@ -8,12 +8,13 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <wayland-client.h>
+#include <wlr-foreign-toplevel-management-unstable-v1-protocol.h>
+#include <wlr-layer-shell-unstable-v1-protocol.h>
 
 #include "client.h"
-#include "layer-shell.h"
 #include "render.h"
 #include "util.h"
-#include "wlr-foreign.h"
 
 #define NUM_INTERFACES 5
 
