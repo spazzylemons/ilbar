@@ -114,10 +114,10 @@ int main(int argc, char *argv[]) {
         switch (opt) {
         case 'h':
             print_help(argv[0]);
-            exit(EXIT_SUCCESS);
+            return EXIT_SUCCESS;
         case 'v':
             print_version();
-            exit(EXIT_SUCCESS);
+            return EXIT_SUCCESS;
         case 'd':
             display = optarg;
             break;
@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
             config_path = optarg;
             break;
         default:
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
     }
 
