@@ -75,7 +75,7 @@ static void on_buffer_release(
     struct wl_buffer *buffer
 ) {
     wl_buffer_destroy(buffer);
-};
+}
 
 static const struct wl_buffer_listener buffer_listener = {
     .release = on_buffer_release,
@@ -85,9 +85,10 @@ static int alloc_shm(Client *client, int size) {
     static uint8_t counter = 0;
     /* create shm file name using various factors to avoid collision */
     pid_t pid = getpid();
-    int n = snprintf(NULL, 0, "/ilbar-shm-%d-%p-%d", pid, client, counter) + 1;
+    int n = snprintf(
+        NULL, 0, "/ilbar-shm-%d-%p-%d", pid, (void*) client, counter) + 1;
     char name[n];
-    snprintf(name, n, "/ilbar-shm-%d-%p-%d", pid, client, counter++);
+    snprintf(name, n, "/ilbar-shm-%d-%p-%d", pid, (void*) client, counter++);
     log_info("opening new shm file: %s", name);
     /* open a shared memory file */
     int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);

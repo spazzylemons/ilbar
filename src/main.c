@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
         case 'd':
             display = optarg;
             break;
-        case 's':
+        case 's': {
             long new_height = atol(optarg);
             if (new_height <= 0 || new_height > UINT32_MAX) {
                 fprintf(stderr, "invalid height: '%s'\n", optarg);
@@ -43,6 +43,7 @@ int main(int argc, char *argv[]) {
             }
             height = new_height;
             break;
+        }
         default:
             exit(EXIT_FAILURE);
         }
