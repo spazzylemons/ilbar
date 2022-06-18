@@ -5,13 +5,11 @@ A simple classic taskbar for Wayland desktops.
 ## Build requirements
 
 - cairo
-- make
+- meson
 - wayland-client
 - wayland-protocols
 - wayland-scanner
 - A C compiler
-
-Run `make`, and if successful, the executable is located at `build/ilbar`.
 
 ## Usage requirements
 
