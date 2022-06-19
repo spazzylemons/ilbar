@@ -7,6 +7,7 @@
 #include <wayland-util.h>
 
 #include "config.h"
+#include "gui.h"
 
 /** An open toplevel window. */
 typedef struct {
@@ -19,7 +20,7 @@ typedef struct {
 } Toplevel;
 
 /** The interface to Wayland. */
-typedef struct {
+typedef struct Client {
     /** The config settings */
     const Config *config;
     /** Global display object */
@@ -54,6 +55,8 @@ typedef struct {
     int mouse_x, mouse_y;
     /** A list of toplevel info. */
     struct wl_list toplevels;
+    /** The GUI tree. */
+    Element *gui;
 } Client;
 
 /** Create a new client object. */

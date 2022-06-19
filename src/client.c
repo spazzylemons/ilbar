@@ -13,10 +13,12 @@
 #include <wlr-layer-shell-unstable-v1-protocol.h>
 
 #include "client.h"
-#include "render.h"
 #include "util.h"
 
 #define NUM_INTERFACES 5
+
+#define BUTTON_WIDTH 160
+#define BUTTON_MARGIN 3
 
 struct {
     uint8_t bytes[2];
@@ -169,7 +171,9 @@ static struct wl_buffer *draw_frame(Client *client) {
         log_warn("failed to create shm pool buffer");
         return NULL;
     }
-    render_taskbar(client);
+    if (client->gui) {
+        element_render_root(client->gui, client);
+    }
     wl_buffer_add_listener(buffer, &buffer_listener, NULL);
     return buffer;
 }
@@ -186,6 +190,54 @@ static void rerender(Client *client) {
     }
 }
 
+static Element *create_gui(Client *client) {
+    Element *root = element_init_root();
+    if (!root) return NULL;
+
+    root->x = 0;
+    root->y = 0;
+    root->width = client->width;
+    root->height = client->height;
+
+    int x = BUTTON_MARGIN;
+
+    Toplevel *toplevel;
+    wl_list_for_each_reverse(toplevel, &client->toplevels, link) {
+        Element *button = element_init_child(root, &WindowButton);
+        if (button) {
+            Element *text = element_init_child(button, &Text);
+            if (text) {
+                button->x = x;
+                button->y = 4;
+                button->width = BUTTON_WIDTH;
+                button->height = 22;
+                button->handle = toplevel->handle;
+                button->seat = client->seat;
+
+                text->x = BUTTON_MARGIN;
+                text->y = 4;
+                text->width = BUTTON_WIDTH - (2 * BUTTON_MARGIN);
+                text->height = 22 - (2 * 4);
+                if (toplevel->title) text->text = strdup(toplevel->title);
+                x += BUTTON_WIDTH + BUTTON_MARGIN;
+                continue;
+            }
+        }
+        element_destroy(root);
+        return NULL;
+    }
+
+    return root;
+}
+
+static void update_gui(Client *client) {
+    Element *new_gui = create_gui(client);
+    if (new_gui) {
+        if (client->gui) element_destroy(client->gui);
+        client->gui = new_gui;
+    }
+}
+
 static void on_surface_configure(
     void                         *data,
     struct zwlr_layer_surface_v1 *surface,
@@ -197,6 +249,7 @@ static void on_surface_configure(
     zwlr_layer_surface_v1_ack_configure(surface, serial);
 
     update_shm(client, width, height);
+    update_gui(client);
     rerender(client);
 }
 
@@ -508,6 +561,7 @@ static void on_handle_done(
     struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle)
 ) {
     Client *client = data;
+    update_gui(client);
     rerender(client);
 }
 
@@ -517,12 +571,20 @@ static void on_handle_closed(
 ) {
     Client *client = data;
 
+    /* Destroy the GUI to prevet invalid handles */
+    if (client->gui) {
+        element_destroy(client->gui);
+        client->gui = NULL;
+    }
+
     Toplevel *toplevel = find_toplevel(client, handle);
     if (toplevel) {
         free_toplevel(toplevel);
     } else {
         zwlr_foreign_toplevel_handle_v1_destroy(handle);
     }
+
+    update_gui(client);
 }
 
 static void on_handle_parent(
@@ -700,6 +762,8 @@ void client_run(Client *self) {
 void client_deinit(Client *self) {
     free_all_toplevels(self);
 
+    if (self->gui) element_destroy(self->gui);
+
     if (self->buffer) munmap(self->buffer, self->width * self->height * 4);
     if (self->buffer_fd >= 0) close(self->buffer_fd);
 
@@ -722,6 +786,7 @@ void client_deinit(Client *self) {
 }
 
 void client_click(Client *self) {
-    /* just close the taskbar on click as there's nothing else to do */
-    self->should_close = true;
+    if (self->gui) {
+        element_click(self->gui, self->mouse_x, self->mouse_y);
+    }
 }
