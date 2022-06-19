@@ -24,6 +24,10 @@ All you need to run ilbar is a Wayland compositor which provides the following i
 
 You can check if your compositor supports these by using the `wayland-info` program from within your compositor.
 
+## Screenshot
+
+![screenshot of ilbar running in labwc](screenshot.png)
+
 ## License
 
 ilbar is licensed under the MIT License.
