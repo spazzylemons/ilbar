@@ -29,8 +29,8 @@ static void window_button_release(Element *self) {
 }
 
 static void window_button_render(Element *self, cairo_t *cr) {
-    double left = -0.5, right = left + self->width;
-    double top = -0.5, bottom = top + self->height;
+    double left = 0.5, right = left + self->width - 1.0;
+    double top = 0.5, bottom = top + self->height - 1.0;
 
     if (self->pressed_hover) {
         /* inset button */
@@ -40,9 +40,9 @@ static void window_button_render(Element *self, cairo_t *cr) {
     }
 
     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_move_to(cr, left, bottom - 1.0);
+    cairo_move_to(cr, left, bottom - 0.99);
     cairo_line_to(cr, left, top);
-    cairo_line_to(cr, right - 1.0, top);
+    cairo_line_to(cr, right - 0.99, top);
     cairo_stroke(cr);
 
     cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
@@ -225,6 +225,8 @@ void element_render_root(Element *element, Client *client) {
     cairo_select_font_face(cr, client->config->font,
         CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
     cairo_set_font_size(cr, client->config->font_size);
+    cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
+    cairo_set_line_width(cr, 1.0);
 
     element_render(element, cr);
 
