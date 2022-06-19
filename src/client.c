@@ -138,7 +138,7 @@ static void update_shm(Client *client, uint32_t width, uint32_t height) {
         log_warn("failed to create shm pool");
         munmap(buffer, size);
         close(fd);
-        return NULL;
+        return;
     }
 
     uint32_t format = (endian_check.value == 1)
@@ -157,7 +157,7 @@ static void update_shm(Client *client, uint32_t width, uint32_t height) {
         log_warn("failed to create shm pool buffer");
         munmap(buffer, size);
         close(fd);
-        return NULL;
+        return;
     }
 
     if (client->buffer) {
