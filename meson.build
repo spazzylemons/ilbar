@@ -63,6 +63,10 @@ cj = declare_dependency(
   link_with: static_library('cj', cj_lib),
 )
 
+log = declare_dependency(
+  link_with: static_library('log', 'lib/log.c')
+)
+
 executable(
   'ilbar',
 
@@ -71,7 +75,6 @@ executable(
     'src/config.c',
     'src/gui.c',
     'src/main.c',
-    'lib/log.c',
   ),
 
   include_directories: [
@@ -84,6 +87,7 @@ executable(
     dependency('cairo'),
     protocols,
     cj,
+    log,
   ],
 
   install: true,
