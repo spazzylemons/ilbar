@@ -172,17 +172,7 @@ void element_render_root(Element *element, Client *client) {
         client->width,
         client->height,
         client->width * 4);
-    if (!surface) {
-        log_warn("failed to create image surface");
-        return;
-    }
-
     cairo_t *cr = cairo_create(surface);
-    if (!cr) {
-        log_warn("failed to create cairo instance");
-        cairo_surface_destroy(surface);
-        return;
-    }
 
     cairo_select_font_face(cr, client->config->font,
         CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
