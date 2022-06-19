@@ -11,11 +11,12 @@
 #include <wayland-client.h>
 #include <wlr-foreign-toplevel-management-unstable-v1-protocol.h>
 #include <wlr-layer-shell-unstable-v1-protocol.h>
+#include <relative-pointer-unstable-v1-protocol.h>
 
 #include "client.h"
 #include "util.h"
 
-#define NUM_INTERFACES 5
+#define NUM_INTERFACES 6
 
 struct {
     uint8_t bytes[2];
@@ -69,6 +70,39 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = on_registry_global_remove,
 };
 
+static const struct wl_buffer_listener buffer_listener;
+
+static struct wl_buffer *refresh_pool_buffer(Client *client) {
+    int size = client->width * client->height * 4;
+
+    struct wl_shm_pool *pool =
+        wl_shm_create_pool(client->shm, client->buffer_fd, size);
+    if (!pool) {
+        log_warn("failed to create shm pool");
+        return NULL;
+    }
+
+    uint32_t format = (endian_check.value == 1)
+        ? WL_SHM_FORMAT_BGRX8888
+        : WL_SHM_FORMAT_XRGB8888;
+
+    struct wl_buffer *pool_buffer = wl_shm_pool_create_buffer(
+        pool,
+        0,
+        client->width,
+        client->height,
+        client->width * 4,
+        format);
+    wl_shm_pool_destroy(pool);
+    if (!pool_buffer) {
+        log_warn("failed to create shm pool buffer");
+    } else {
+        wl_buffer_add_listener(pool_buffer, &buffer_listener, client);
+    }
+
+    return pool_buffer;
+}
+
 static void on_buffer_release(
     void             *data,
     struct wl_buffer *buffer
@@ -76,7 +110,7 @@ static void on_buffer_release(
     Client *client = data;
     if (buffer == client->pool_buffer) {
         wl_buffer_destroy(buffer);
-        client->pool_buffer = NULL;
+        client->pool_buffer = refresh_pool_buffer(client);
     }
 }
 
@@ -132,34 +166,6 @@ static void update_shm(Client *client, uint32_t width, uint32_t height) {
         return;
     }
 
-    struct wl_shm_pool *pool =
-        wl_shm_create_pool(client->shm, fd, size);
-    if (!pool) {
-        log_warn("failed to create shm pool");
-        munmap(buffer, size);
-        close(fd);
-        return;
-    }
-
-    uint32_t format = (endian_check.value == 1)
-        ? WL_SHM_FORMAT_BGRX8888
-        : WL_SHM_FORMAT_XRGB8888;
-
-    struct wl_buffer *pool_buffer = wl_shm_pool_create_buffer(
-        pool,
-        0,
-        width,
-        height,
-        width * 4,
-        format);
-    wl_shm_pool_destroy(pool);
-    if (!pool_buffer) {
-        log_warn("failed to create shm pool buffer");
-        munmap(buffer, size);
-        close(fd);
-        return;
-    }
-
     if (client->buffer) {
         munmap(client->buffer, old_size);
     }
@@ -170,24 +176,22 @@ static void update_shm(Client *client, uint32_t width, uint32_t height) {
     }
     client->buffer_fd = fd;
 
-    if (client->pool_buffer) {
-        wl_buffer_destroy(client->pool_buffer);
-    }
-    client->pool_buffer = pool_buffer;
-    wl_buffer_add_listener(pool_buffer, &buffer_listener, client);
-
     client->width = width;
     client->height = height;
 }
 
 static void rerender(Client *client) {
-    if (client->buffer && client->buffer_fd &&
-        client->pool_buffer && client->gui) {
-        element_render_root(client->gui, client);
-        wl_surface_attach(client->wl_surface, client->pool_buffer, 0, 0);
-        wl_surface_commit(client->wl_surface);
-        wl_surface_damage(client->wl_surface,
-            0, 0, client->width, client->height);
+    if (client->buffer && client->buffer_fd && client->gui) {
+        if (!client->pool_buffer) {
+            client->pool_buffer = refresh_pool_buffer(client);
+        }
+        if (client->pool_buffer) {
+            element_render_root(client->gui, client);
+            wl_surface_attach(client->wl_surface, client->pool_buffer, 0, 0);
+            wl_surface_commit(client->wl_surface);
+            wl_surface_damage(client->wl_surface,
+                0, 0, client->width, client->height);
+        }
     }
 }
 
@@ -277,8 +281,8 @@ static void on_pointer_enter(
     wl_fixed_t         surface_y
 ) {
     Client *client = data;
-    client->mouse_x = wl_fixed_to_int(surface_x);
-    client->mouse_y = wl_fixed_to_int(surface_y);
+    client->mouse_x = surface_x;
+    client->mouse_y = surface_y;
 }
 
 static void on_pointer_leave(
@@ -289,16 +293,12 @@ static void on_pointer_leave(
 ) {}
 
 static void on_pointer_motion(
-    void              *data,
+    void              *UNUSED(data),
     struct wl_pointer *UNUSED(pointer),
     uint32_t           UNUSED(time),
-    wl_fixed_t         surface_x,
-    wl_fixed_t         surface_y
-) {
-    Client *client = data;
-    client->mouse_x = wl_fixed_to_int(surface_x);
-    client->mouse_y = wl_fixed_to_int(surface_y);
-}
+    wl_fixed_t         UNUSED(surface_x),
+    wl_fixed_t         UNUSED(surface_y)
+) {}
 
 static void on_pointer_button(
     void              *data,
@@ -308,9 +308,12 @@ static void on_pointer_button(
     uint32_t           button,
     uint32_t           state
 ) {
+    Client *client = data;
     if (button == BTN_LEFT) {
         if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
-            client_click(data);
+            client_press(client);
+        } else {
+            client_release(client);
         }
     }
 }
@@ -360,6 +363,26 @@ static const struct wl_pointer_listener pointer_listener = {
     .axis_discrete = on_pointer_axis_discrete,
 };
 
+static void on_relative_motion(
+    void                           *data,
+    struct zwp_relative_pointer_v1 *UNUSED(relative),
+    uint32_t                        UNUSED(utime_hi),
+    uint32_t                        UNUSED(utime_lo),
+    wl_fixed_t                      dx,
+    wl_fixed_t                      dy,
+    wl_fixed_t                      UNUSED(dx_unaccel),
+    wl_fixed_t                      UNUSED(dy_unaccel)
+) {
+    Client *client = data;
+    client->mouse_x += dx;
+    client->mouse_y += dy;
+    client_motion(client);
+}
+
+static const struct zwp_relative_pointer_v1_listener relative_listener = {
+    .relative_motion = on_relative_motion,
+};
+
 static void on_touch_down(
     void              *data,
     struct wl_touch   *UNUSED(touch),
@@ -371,27 +394,35 @@ static void on_touch_down(
     wl_fixed_t         y
 ) {
     Client *client = data;
-    client->mouse_x = wl_fixed_to_int(x);
-    client->mouse_y = wl_fixed_to_int(y);
-    client_click(client);
+    client->mouse_x = x;
+    client->mouse_y = y;
+    client_press(client);
 }
 
 static void on_touch_up(
-    void              *UNUSED(data),
+    void              *data,
     struct wl_touch   *UNUSED(touch),
     uint32_t           UNUSED(serial),
     uint32_t           UNUSED(time),
     int32_t            UNUSED(id)
-) {}
+) {
+    Client *client = data;
+    client_release(client);
+}
 
 static void on_touch_motion(
-    void              *UNUSED(data),
+    void              *data,
     struct wl_touch   *UNUSED(touch),
     uint32_t           UNUSED(time),
     int32_t            UNUSED(id),
-    wl_fixed_t         UNUSED(x),
-    wl_fixed_t         UNUSED(y)
-) {}
+    wl_fixed_t         x,
+    wl_fixed_t         y
+) {
+    Client *client = data;
+    client->mouse_x = x;
+    client->mouse_y = y;
+    client_motion(client);
+}
 
 static void on_touch_frame(
     void              *UNUSED(data),
@@ -438,9 +469,24 @@ static void on_seat_capabilities(
     if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
         struct wl_pointer *pointer = wl_seat_get_pointer(seat);
         if (pointer) {
-            if (client->pointer) wl_pointer_destroy(client->pointer);
-            client->pointer = pointer;
-            wl_pointer_add_listener(client->pointer, &pointer_listener, client);
+            struct zwp_relative_pointer_v1 *relative_pointer =
+                zwp_relative_pointer_manager_v1_get_relative_pointer(
+                    client->pointer_manager,
+                    pointer);
+            if (relative_pointer) {
+                if (client->relative_pointer)
+                    zwp_relative_pointer_v1_destroy(client->relative_pointer);
+                client->relative_pointer = relative_pointer;
+                if (client->pointer) wl_pointer_destroy(client->pointer);
+                client->pointer = pointer;
+                zwp_relative_pointer_v1_add_listener(
+                    client->relative_pointer, &relative_listener, client);
+                wl_pointer_add_listener(
+                    client->pointer, &pointer_listener, client);
+            } else {
+                wl_pointer_destroy(pointer);
+                log_warn("failed to obtain the relative pointer");
+            }
         } else {
             log_warn("failed to obtain the pointer");
         }
@@ -587,6 +633,7 @@ static void on_handle_closed(
     }
 
     update_gui(client);
+    rerender(client);
 }
 
 static void on_handle_parent(
@@ -692,6 +739,12 @@ Client *client_init(const char *display, const Config *config) {
             .version = 3,
             .out = (void**) (void*) &self->toplevel_manager,
         },
+
+        {
+            .interface = &zwp_relative_pointer_manager_v1_interface,
+            .version = 1,
+            .out = (void**) (void*) &self->pointer_manager,
+        }
     };
 
     wl_registry_add_listener(registry, &registry_listener, &specs);
@@ -770,6 +823,8 @@ void client_deinit(Client *self) {
     if (self->buffer) munmap(self->buffer, self->width * self->height * 4);
     if (self->buffer_fd >= 0) close(self->buffer_fd);
 
+    if (self->relative_pointer)
+        zwp_relative_pointer_v1_destroy(self->relative_pointer);
     if (self->pointer) wl_pointer_destroy(self->pointer);
     if (self->touch) wl_touch_destroy(self->touch);
 
@@ -782,14 +837,40 @@ void client_deinit(Client *self) {
     if (self->seat) wl_seat_destroy(self->seat);
     if (self->toplevel_manager)
         zwlr_foreign_toplevel_manager_v1_destroy(self->toplevel_manager);
+    if (self->pointer_manager)
+        zwp_relative_pointer_manager_v1_destroy(self->pointer_manager);
 
     if (self->display) wl_display_disconnect(self->display);
 
     free(self);
 }
 
-void client_click(Client *self) {
-    if (self->gui) {
-        element_click(self->gui, self->mouse_x, self->mouse_y);
+void client_press(Client *self) {
+    if (self->gui && !self->mouse_down) {
+        element_press(
+            self->gui,
+            wl_fixed_to_int(self->mouse_x),
+            wl_fixed_to_int(self->mouse_y));
     }
+    self->mouse_down = true;
+    rerender(self);
+}
+
+void client_motion(Client *self) {
+    if (self->gui) {
+        element_motion(
+            self->gui,
+            wl_fixed_to_int(self->mouse_x),
+            wl_fixed_to_int(self->mouse_y));
+    }
+
+    rerender(self);
+}
+
+void client_release(Client *self) {
+    if (self->gui && self->mouse_down) {
+        element_release(self->gui);
+    }
+    self->mouse_down = false;
+    rerender(self);
 }

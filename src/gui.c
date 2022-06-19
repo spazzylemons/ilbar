@@ -18,18 +18,26 @@ static void root_render(Element *self, cairo_t *cr) {
 }
 
 static const ElementClass Root = {
+    .clickable = false,
     .free_data = NULL,
-    .click = NULL,
+    .release = NULL,
     .render = root_render,
 };
 
-static void window_button_click(Element *self) {
+static void window_button_release(Element *self) {
     zwlr_foreign_toplevel_handle_v1_activate(self->handle, self->seat);
 }
 
 static void window_button_render(Element *self, cairo_t *cr) {
     double left = -0.5, right = left + self->width;
     double top = -0.5, bottom = top + self->height;
+
+    if (self->pressed_hover) {
+        /* inset button */
+        double temp;
+        temp = left, left = right, right = temp;
+        temp = top, top = bottom, bottom = temp;
+    }
 
     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
     cairo_move_to(cr, left, bottom - 1.0);
@@ -51,8 +59,9 @@ static void window_button_render(Element *self, cairo_t *cr) {
 }
 
 const ElementClass WindowButton = {
+    .clickable = true,
     .free_data = NULL,
-    .click = window_button_click,
+    .release = window_button_release,
     .render = window_button_render,
 };
 
@@ -79,8 +88,9 @@ static void text_render(Element *self, cairo_t *cr) {
 }
 
 const ElementClass Text = {
+    .clickable = false,
     .free_data = text_free,
-    .click = NULL,
+    .release = NULL,
     .render = text_render,
 };
 
@@ -130,18 +140,56 @@ void element_destroy(Element *element) {
     free(element);
 }
 
-bool element_click(Element *element, int x, int y) {
+bool element_press(Element *element, int x, int y) {
     if (x < 0 || x >= element->width) return false;
     if (y < 0 || y >= element->height) return false;
 
-    if (element->class->click) {
-        element->class->click(element);
+    if (element->class->clickable) {
+        element->pressed = true;
+        element->pressed_hover = true;
         return true;
     }
 
     Element *child;
     wl_list_for_each(child, &element->children, link) {
-        if (element_click(child, x - child->x, y - child->y)) {
+        if (element_press(child, x - child->x, y - child->y)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool element_motion(Element *element, int x, int y) {
+    if (element->pressed) {
+        element->pressed_hover =
+            x >= 0 && x < element->width && y >= 0 && y < element->height;
+        return true;
+    }
+
+    Element *child;
+    wl_list_for_each(child, &element->children, link) {
+        if (element_motion(child, x - child->x, y - child->y)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool element_release(Element *element) {
+    if (element->pressed) {
+        element->pressed = false;
+        if (element->pressed_hover && element->class->release) {
+            element->class->release(element);
+        }
+        element->pressed_hover = false;
+        return true;
+    }
+
+    Element *child;
+    wl_list_for_each(child, &element->children, link) {
+        if (element_release(child)) {
             return true;
         }
     }

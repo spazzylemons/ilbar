@@ -20,6 +20,7 @@ All you need to run ilbar is a Wayland compositor which provides the following i
 - wl_shm, version 1
 - zwlr_foreign_toplevel_manager_v1, version 3
 - zwlr_layer_shell_v1, version 4
+- zwp_relative_pointer_manager_v1, version 1
 
 You can check if your compositor supports these by using the `wayland-info` program from within your compositor.
 

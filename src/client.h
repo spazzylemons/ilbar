@@ -35,12 +35,16 @@ typedef struct Client {
     struct wl_seat *seat;
     /** Global importer object */
     struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
+    /** Global relative pointer object */
+    struct zwp_relative_pointer_manager_v1 *pointer_manager;
     /** Current Wayland surface object */
     struct wl_surface *wl_surface;
     /** Current layer surface object */
     struct zwlr_layer_surface_v1 *layer_surface;
     /** Current pointer object */
     struct wl_pointer *pointer;
+    /** Current relative pointer object */
+    struct zwp_relative_pointer_v1 *relative_pointer;
     /** Current touch object */
     struct wl_touch *touch;
     /** The current pixel buffer, or NULL if not currently allocated. */
@@ -54,7 +58,9 @@ typedef struct Client {
     /** The current dimensions of the surface. */
     uint32_t width, height;
     /** The last seen position of the pointer or touch. */
-    int mouse_x, mouse_y;
+    wl_fixed_t mouse_x, mouse_y;
+    /** If true, the mouse is considered pressed. */
+    bool mouse_down;
     /** A list of toplevel info. */
     struct wl_list toplevels;
     /** The GUI tree. */
@@ -67,7 +73,11 @@ Client *client_init(const char *display, const Config *config);
 void client_run(Client *self);
 /** Destroy the client and all related resources. */
 void client_deinit(Client *self);
-/** Perform a mouse click at the last seen mouse coordinates. */
-void client_click(Client *self);
+/** Perform a mouse press at the last seen mouse coordinates. */
+void client_press(Client *self);
+/** Perform a mouse position update. */
+void client_motion(Client *self);
+/** Perform a mouse release at the last seen mouse coordinates. */
+void client_release(Client *self);
 
 #endif

@@ -21,6 +21,7 @@ scanner_bin = wayland_scanner.get_pkgconfig_variable('wayland_scanner')
 
 protocol_xml = [
   protocols_path / 'stable/xdg-shell/xdg-shell.xml',
+  protocols_path / 'unstable/relative-pointer/relative-pointer-unstable-v1.xml',
   'lib/wlr-foreign-toplevel-management-unstable-v1.xml',
   'lib/wlr-layer-shell-unstable-v1.xml',
 ]

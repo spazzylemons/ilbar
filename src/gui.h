@@ -19,7 +19,11 @@ typedef struct {
     int x, y, width, height;
     /** THe class of this element. */
     const ElementClass *class;
-
+    /** If true, the element has been pressed. */
+    bool pressed;
+    /** If true, the cursor is pressed on the element */
+    bool pressed_hover;
+    /** class-specific data */
     union {
         char *text;
         struct {
@@ -30,8 +34,9 @@ typedef struct {
 } Element;
 
 struct ElementClass {
+    bool clickable;
     void (*free_data)(Element *self);
-    void (*click)(Element *self);
+    void (*release)(Element *self);
     void (*render)(Element *self, cairo_t *cr);
 };
 
@@ -44,7 +49,11 @@ Element *element_init_child(Element *parent, const ElementClass *class);
 
 void element_destroy(Element *element);
 
-bool element_click(Element *element, int x, int y);
+bool element_press(Element *element, int x, int y);
+
+bool element_motion(Element *element, int x, int y);
+
+bool element_release(Element *element);
 
 void element_render(Element *element, cairo_t *cr);
 
