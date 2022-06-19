@@ -51,7 +51,7 @@ static FILE *open_config_file(const char *config_path) {
             const char *home = getenv("HOME");
             generated = alloc_printf("%s/.config/ilbar/config.json", home);
         }
-        if (generated) {
+        if (!generated) {
             log_error("unable to allocate config path");
             return NULL;
         }
