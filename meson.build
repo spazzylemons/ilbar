@@ -68,6 +68,7 @@ executable(
 
   sources: files(
     'src/client.c',
+    'src/config.c',
     'src/gui.c',
     'src/main.c',
     'lib/log.c',

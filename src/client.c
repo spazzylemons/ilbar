@@ -17,9 +17,6 @@
 
 #define NUM_INTERFACES 5
 
-#define BUTTON_WIDTH 160
-#define BUTTON_MARGIN 3
-
 struct {
     uint8_t bytes[2];
     uint16_t value;
@@ -199,7 +196,7 @@ static Element *create_gui(Client *client) {
     root->width = client->width;
     root->height = client->height;
 
-    int x = BUTTON_MARGIN;
+    int x = client->config->margin;
 
     Toplevel *toplevel;
     wl_list_for_each_reverse(toplevel, &client->toplevels, link) {
@@ -209,17 +206,18 @@ static Element *create_gui(Client *client) {
             if (text) {
                 button->x = x;
                 button->y = 4;
-                button->width = BUTTON_WIDTH;
-                button->height = 22;
+                button->width = client->config->width;
+                button->height = client->config->height - 6;
                 button->handle = toplevel->handle;
                 button->seat = client->seat;
 
-                text->x = BUTTON_MARGIN;
-                text->y = 4;
-                text->width = BUTTON_WIDTH - (2 * BUTTON_MARGIN);
-                text->height = 22 - (2 * 4);
+                text->x = client->config->margin;
+                text->y = (button->height - client->config->font_height) / 2;
+                text->width =
+                    client->config->width - (2 * client->config->margin);
+                text->height = client->config->font_height;
                 if (toplevel->title) text->text = strdup(toplevel->title);
-                x += BUTTON_WIDTH + BUTTON_MARGIN;
+                x += client->config->width + client->config->margin;
                 continue;
             }
         }

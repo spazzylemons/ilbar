@@ -6,8 +6,6 @@
 #include <string.h>
 #include <wlr-foreign-toplevel-management-unstable-v1-protocol.h>
 
-#define TEXT_SIZE 11
-
 static void root_render(Element *self, cairo_t *cr) {
     cairo_set_source_rgb(cr, 0.75, 0.75, 0.75);
     cairo_rectangle(cr, 0.0, 0.0, self->width, self->height);
@@ -186,9 +184,9 @@ void element_render_root(Element *element, Client *client) {
         return;
     }
 
-    cairo_select_font_face(cr, "FreeSans",
+    cairo_select_font_face(cr, client->config->font,
         CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr, TEXT_SIZE);
+    cairo_set_font_size(cr, client->config->font_size);
 
     element_render(element, cr);
 

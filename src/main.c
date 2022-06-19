@@ -23,10 +23,6 @@ static void print_version(void) {
     printf("license: MIT <https://opensource.org/licenses/MIT>\n");
 }
 
-static void load_default_config(Config *config) {
-    config->height = 28;
-}
-
 static char *alloc_printf(const char *fmt, ...) {
     va_list arg;
     va_start(arg, fmt);
@@ -68,27 +64,6 @@ static FILE *open_config_file(const char *config_path) {
     return result;
 }
 
-static void parse_config_file(const CJValue *value, Config *config) {
-    if (value->type != CJ_OBJECT) {
-        log_error("config root is not an object");
-        return;
-    }
-    const CJObject *root = &value->as.object;
-
-    for (size_t i = 0; i < root->length; ++i) {
-        if (strcmp(root->members[i].key.chars, "height") == 0) {
-            const CJValue *height = &root->members[i].value;
-            if (height->type != CJ_NUMBER ||
-                height->as.number <= 0 ||
-                height->as.number > UINT32_MAX) {
-                log_error("invalid height value");
-            } else {
-                config->height = height->as.number;
-            }
-        }
-    }
-}
-
 static void read_config_file(const char *config_path, Config *config) {
     FILE *file = open_config_file(config_path);
     if (!file) return;
@@ -98,11 +73,12 @@ static void read_config_file(const char *config_path, Config *config) {
     cj_init_file_reader(&fr, file, buffer, sizeof(buffer));
     CJValue json;
     if (cj_parse(NULL, &fr.reader, &json) != CJ_SUCCESS) {
+        log_error("failed to parse config file");
         fclose(file);
         return;
     }
     fclose(file);
-    parse_config_file(&json, config);
+    config_parse(config, &json);
     cj_free(NULL, &json);
 }
 
@@ -130,14 +106,17 @@ int main(int argc, char *argv[]) {
     }
 
     Config config;
-    load_default_config(&config);
+    config_defaults(&config);
     read_config_file(config_path, &config);
+    config_process(&config);
 
     Client *client = client_init(display, &config);
     if (client == NULL) {
+        config_deinit(&config);
         return EXIT_FAILURE;
     }
     client_run(client);
     client_deinit(client);
+    config_deinit(&config);
     return EXIT_SUCCESS;
 }
