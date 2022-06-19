@@ -261,10 +261,13 @@ static void on_surface_configure(
 
 static void on_surface_closed(
     void                         *data,
-    struct zwlr_layer_surface_v1 *UNUSED(surface)
+    struct zwlr_layer_surface_v1 *surface
 ) {
     Client *client = data;
-    client->should_close = true;
+    if (surface == client->layer_surface) {
+        log_info("surface was closed, shutting down");
+        client->should_close = true;
+    }
 }
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
@@ -701,6 +704,8 @@ Client *client_init(const char *display, const Config *config) {
         client_deinit(self);
         return NULL;
     }
+    log_info("connected to display %s",
+        display ? display : getenv("WAYLAND_DISPLAY"));
 
     struct wl_registry *registry = wl_display_get_registry(self->display);
     if (!registry) {
@@ -780,7 +785,7 @@ Client *client_init(const char *display, const Config *config) {
         self->layer_shell,
         self->wl_surface,
         NULL,
-        ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+        ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
         "ilbar");
     if (!self->layer_surface) {
         log_error("failed to create layer surface");
@@ -811,7 +816,12 @@ Client *client_init(const char *display, const Config *config) {
 }
 
 void client_run(Client *self) {
-    while (!self->should_close && wl_display_dispatch(self->display));
+    while (!self->should_close && wl_display_dispatch(self->display) >= 0);
+
+    int err = wl_display_get_error(self->display);
+    if (err) {
+        log_fatal("disconnected: %s", strerror(err));
+    }
 }
 
 void client_deinit(Client *self) {
