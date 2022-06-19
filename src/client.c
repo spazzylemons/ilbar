@@ -70,10 +70,14 @@ static const struct wl_registry_listener registry_listener = {
 };
 
 static void on_buffer_release(
-    void             *UNUSED(data),
+    void             *data,
     struct wl_buffer *buffer
 ) {
-    wl_buffer_destroy(buffer);
+    Client *client = data;
+    if (buffer == client->pool_buffer) {
+        wl_buffer_destroy(buffer);
+        client->pool_buffer = NULL;
+    }
 }
 
 static const struct wl_buffer_listener buffer_listener = {
@@ -128,6 +132,34 @@ static void update_shm(Client *client, uint32_t width, uint32_t height) {
         return;
     }
 
+    struct wl_shm_pool *pool =
+        wl_shm_create_pool(client->shm, fd, size);
+    if (!pool) {
+        log_warn("failed to create shm pool");
+        munmap(buffer, size);
+        close(fd);
+        return NULL;
+    }
+
+    uint32_t format = (endian_check.value == 1)
+        ? WL_SHM_FORMAT_BGRX8888
+        : WL_SHM_FORMAT_XRGB8888;
+
+    struct wl_buffer *pool_buffer = wl_shm_pool_create_buffer(
+        pool,
+        0,
+        width,
+        height,
+        width * 4,
+        format);
+    wl_shm_pool_destroy(pool);
+    if (!pool_buffer) {
+        log_warn("failed to create shm pool buffer");
+        munmap(buffer, size);
+        close(fd);
+        return NULL;
+    }
+
     if (client->buffer) {
         munmap(client->buffer, old_size);
     }
@@ -137,53 +169,25 @@ static void update_shm(Client *client, uint32_t width, uint32_t height) {
         close(client->buffer_fd);
     }
     client->buffer_fd = fd;
+
+    if (client->pool_buffer) {
+        wl_buffer_destroy(client->pool_buffer);
+    }
+    client->pool_buffer = pool_buffer;
+    wl_buffer_add_listener(pool_buffer, &buffer_listener, client);
+
     client->width = width;
     client->height = height;
 }
 
-static struct wl_buffer *draw_frame(Client *client) {
-    int stride = client->width * 4;
-    int size = stride * client->height;
-
-    struct wl_shm_pool *pool =
-        wl_shm_create_pool(client->shm, client->buffer_fd, size);
-    if (!pool) {
-        log_warn("failed to create shm pool");
-        return NULL;
-    }
-
-    uint32_t format = (endian_check.value == 1)
-        ? WL_SHM_FORMAT_BGRX8888
-        : WL_SHM_FORMAT_XRGB8888;
-
-    struct wl_buffer *buffer = wl_shm_pool_create_buffer(
-        pool,
-        0,
-        client->width,
-        client->height,
-        stride,
-        format);
-    wl_shm_pool_destroy(pool);
-    if (!buffer) {
-        log_warn("failed to create shm pool buffer");
-        return NULL;
-    }
-    if (client->gui) {
-        element_render_root(client->gui, client);
-    }
-    wl_buffer_add_listener(buffer, &buffer_listener, NULL);
-    return buffer;
-}
-
 static void rerender(Client *client) {
-    if (client->buffer && client->buffer_fd) {
-        struct wl_buffer *buffer = draw_frame(client);
-        if (buffer) {
-            wl_surface_attach(client->wl_surface, buffer, 0, 0);
-            wl_surface_commit(client->wl_surface);
-            wl_surface_damage(client->wl_surface,
-                0, 0, client->width, client->height);
-        }
+    if (client->buffer && client->buffer_fd &&
+        client->pool_buffer && client->gui) {
+        element_render_root(client->gui, client);
+        wl_surface_attach(client->wl_surface, client->pool_buffer, 0, 0);
+        wl_surface_commit(client->wl_surface);
+        wl_surface_damage(client->wl_surface,
+            0, 0, client->width, client->height);
     }
 }
 
@@ -762,6 +766,7 @@ void client_deinit(Client *self) {
 
     if (self->gui) element_destroy(self->gui);
 
+    if (self->pool_buffer) wl_buffer_destroy(self->pool_buffer);
     if (self->buffer) munmap(self->buffer, self->width * self->height * 4);
     if (self->buffer_fd >= 0) close(self->buffer_fd);
 

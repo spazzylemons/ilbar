@@ -47,6 +47,8 @@ typedef struct Client {
     unsigned char *buffer;
     /** The buffer file descriptor, or -1 if not currently opened. */
     int buffer_fd;
+    /** The currnt shm pool buffer, or NULL if not currently allocated. */
+    struct wl_buffer *pool_buffer;
     /** When set to true, events stop being dispatched. */
     bool should_close;
     /** The current dimensions of the surface. */
