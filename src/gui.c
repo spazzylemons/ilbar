@@ -2,9 +2,12 @@
 #include "gui.h"
 
 #include <log.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wlr-foreign-toplevel-management-unstable-v1-protocol.h>
+
+#define PI 3.14159265358979323846
 
 static void root_render(Element *self, cairo_t *cr) {
     cairo_set_source_rgb(cr, 0.75, 0.75, 0.75);
@@ -34,15 +37,14 @@ static void window_button_render(Element *self, cairo_t *cr) {
 
     if (self->pressed_hover) {
         /* inset button */
-        double temp;
-        temp = left, left = right, right = temp;
-        temp = top, top = bottom, bottom = temp;
+        cairo_translate(cr, self->width, self->height);
+        cairo_rotate(cr, PI);
     }
 
     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_move_to(cr, left, bottom - 0.99);
+    cairo_move_to(cr, left, bottom);
     cairo_line_to(cr, left, top);
-    cairo_line_to(cr, right - 0.99, top);
+    cairo_line_to(cr, right, top);
     cairo_stroke(cr);
 
     cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
