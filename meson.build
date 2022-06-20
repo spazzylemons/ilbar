@@ -78,7 +78,9 @@ executable(
     'src/client.c',
     'src/config.c',
     'src/gui.c',
+    'src/icons.c',
     'src/main.c',
+    'src/util.c',
   ),
 
   include_directories: [
@@ -89,6 +91,7 @@ executable(
   dependencies: [
     dependency('wayland-client'),
     dependency('cairo'),
+    dependency('gtk+-3.0'),
     protocols,
     cj,
     log,

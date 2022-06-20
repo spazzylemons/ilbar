@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "client.h"
+#include "util.h"
 
 static void print_help(const char *name) {
     printf("usage: %s [-h] [-v] [-d display] [-c config]\n", name);
@@ -23,29 +24,15 @@ static void print_version(void) {
     printf("license: MIT <https://opensource.org/licenses/MIT>\n");
 }
 
-static char *alloc_printf(const char *fmt, ...) {
-    va_list arg;
-    va_start(arg, fmt);
-    int n = vsnprintf(NULL, 0, fmt, arg) + 1;
-    va_end(arg);
-    if (n <= 0) return NULL;
-    char *buf = malloc(n);
-    if (!buf) return NULL;
-    va_start(arg, fmt);
-    vsnprintf(buf, n, fmt, arg);
-    va_end(arg);
-    return buf;
-}
-
 static FILE *open_config_file(const char *config_path) {
     char *generated = NULL;
     if (!config_path) {
         const char *config_home = getenv("XDG_CONFIG_HOME");
         if (config_home) {
-            generated = alloc_printf("%s/ilbar/config.json", config_home);
+            generated = alloc_print("%s/ilbar/config.json", config_home);
         } else {
             const char *home = getenv("HOME");
-            generated = alloc_printf("%s/.config/ilbar/config.json", home);
+            generated = alloc_print("%s/.config/ilbar/config.json", home);
         }
         if (!generated) {
             log_error("unable to allocate config path");
@@ -83,6 +70,11 @@ static void read_config_file(const char *config_path, Config *config) {
 }
 
 int main(int argc, char *argv[]) {
+    gint dummy_argc = 1;
+    gchar *dummy_argv_value[] = { argv[0], NULL };
+    gchar **dummy_argv = dummy_argv_value;
+    gdk_init(&dummy_argc, &dummy_argv);
+
     const char *display = NULL;
     const char *config_path = NULL;
     int opt;

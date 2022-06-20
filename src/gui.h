@@ -30,6 +30,7 @@ typedef struct {
             struct zwlr_foreign_toplevel_handle_v1 *handle;
             struct wl_seat *seat;
         };
+        cairo_surface_t *image;
     };
 } Element;
 
@@ -42,6 +43,7 @@ struct ElementClass {
 
 extern const ElementClass WindowButton;
 extern const ElementClass Text;
+extern const ElementClass Image;
 
 Element *element_init_root(void);
 

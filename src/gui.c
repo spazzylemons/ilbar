@@ -96,6 +96,25 @@ const ElementClass Text = {
     .render = text_render,
 };
 
+static void image_free(Element *self) {
+    cairo_surface_destroy(self->image);
+}
+
+static void image_render(Element *self, cairo_t *cr) {
+    if (self->image) {
+        cairo_set_source_surface(cr, self->image, 0.0, 0.0);
+        cairo_mask_surface(cr, self->image, 0.0, 0.0);
+        cairo_fill(cr);
+    }
+}
+
+const ElementClass Image = {
+    .clickable = false,
+    .free_data = image_free,
+    .release = NULL,
+    .render = image_render,
+};
+
 static Element *alloc_element(void) {
     Element *element = malloc(sizeof(Element));
     if (!element) {

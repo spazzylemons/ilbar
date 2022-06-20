@@ -5,6 +5,7 @@ A simple classic taskbar for Wayland desktops.
 ## Build requirements
 
 - cairo
+- GTK+ 3
 - meson
 - wayland-client
 - wayland-protocols
@@ -13,7 +14,8 @@ A simple classic taskbar for Wayland desktops.
 
 ## Usage requirements
 
-All you need to run ilbar is a Wayland compositor which provides the following interfaces with at least the following versions:
+All you need to run ilbar is GTK+ 3 and a Wayland compositor which provides the
+following interfaces with at least the following versions:
 
 - wl_compositor, version 4
 - wl_seat, version 7
@@ -22,7 +24,8 @@ All you need to run ilbar is a Wayland compositor which provides the following i
 - zwlr_layer_shell_v1, version 4
 - zwp_relative_pointer_manager_v1, version 1
 
-You can check if your compositor supports these by using the `wayland-info` program from within your compositor.
+You can check if your compositor supports these by using the `wayland-info`
+program from within your compositor.
 
 ## Screenshot
 

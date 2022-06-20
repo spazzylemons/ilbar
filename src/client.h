@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "gui.h"
+#include "icons.h"
 
 /** An open toplevel window. */
 typedef struct {
@@ -17,6 +18,8 @@ typedef struct {
     struct zwlr_foreign_toplevel_handle_v1 *handle;
     /** The last seen title as an owned copy. */
     char *title;
+    /** The last seen app ID as an owned copy. */
+    char *app_id;
 } Toplevel;
 
 /** The interface to Wayland. */
@@ -65,6 +68,8 @@ typedef struct Client {
     struct wl_list toplevels;
     /** The GUI tree. */
     Element *gui;
+    /** The icon manager. */
+    IconManager *icons;
 } Client;
 
 /** Create a new client object. */

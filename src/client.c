@@ -195,6 +195,48 @@ static void rerender(Client *client) {
     }
 }
 
+static bool create_taskbar_button(
+    Client *client, Toplevel *toplevel, Element *root, int x) {
+    Element *button = element_init_child(root, &WindowButton);
+    if (button) {
+        button->x = x;
+        button->y = 4;
+        button->width = client->config->width;
+        button->height = client->config->height - 6;
+        button->handle = toplevel->handle;
+        button->seat = client->seat;
+
+        int text_x = client->config->margin;
+        int text_width = client->config->width - (2 * client->config->margin);
+        if (client->icons && toplevel->app_id) {
+            cairo_surface_t *image = icons_get(client->icons, toplevel->app_id);
+            if (image) {
+                Element *icon = element_init_child(button, &Image);
+                if (icon) {
+                    icon->x = client->config->margin;
+                    icon->y = (button->height - 16) / 2;
+                    icon->image = image;
+                    text_x += 16 + client->config->margin;
+                    text_width -= 16 + client->config->margin;
+                } else {
+                    cairo_surface_destroy(image);
+                }
+            }
+        }
+        Element *text = element_init_child(button, &Text);
+        if (text) {
+            text->x = text_x;
+            text->y = (button->height - client->config->font_height) / 2;
+            text->width = text_width;
+            text->height = client->config->font_height;
+            if (toplevel->title) text->text = strdup(toplevel->title);
+        }
+        return true;
+    }
+    element_destroy(button);
+    return false;
+}
+
 static Element *create_gui(Client *client) {
     Element *root = element_init_root();
     if (!root) return NULL;
@@ -208,29 +250,9 @@ static Element *create_gui(Client *client) {
 
     Toplevel *toplevel;
     wl_list_for_each_reverse(toplevel, &client->toplevels, link) {
-        Element *button = element_init_child(root, &WindowButton);
-        if (button) {
-            Element *text = element_init_child(button, &Text);
-            if (text) {
-                button->x = x;
-                button->y = 4;
-                button->width = client->config->width;
-                button->height = client->config->height - 6;
-                button->handle = toplevel->handle;
-                button->seat = client->seat;
-
-                text->x = client->config->margin;
-                text->y = (button->height - client->config->font_height) / 2;
-                text->width =
-                    client->config->width - (2 * client->config->margin);
-                text->height = client->config->font_height;
-                if (toplevel->title) text->text = strdup(toplevel->title);
-                x += client->config->width + client->config->margin;
-                continue;
-            }
+        if (create_taskbar_button(client, toplevel, root, x)) {
+            x += client->config->width + client->config->margin;
         }
-        element_destroy(root);
-        return NULL;
     }
 
     return root;
@@ -241,6 +263,7 @@ static void update_gui(Client *client) {
     if (new_gui) {
         if (client->gui) element_destroy(client->gui);
         client->gui = new_gui;
+        rerender(client);
     }
 }
 
@@ -256,7 +279,6 @@ static void on_surface_configure(
 
     update_shm(client, width, height);
     update_gui(client);
-    rerender(client);
 }
 
 static void on_surface_closed(
@@ -529,6 +551,7 @@ static Toplevel *add_toplevel(Client *client,
     wl_list_insert(&client->toplevels, &toplevel->link);
     toplevel->handle = handle;
     toplevel->title = NULL;
+    toplevel->app_id = NULL;
 
     return toplevel;
 }
@@ -555,6 +578,7 @@ static void free_toplevel(Toplevel *toplevel) {
     wl_list_remove(&toplevel->link);
     zwlr_foreign_toplevel_handle_v1_destroy(toplevel->handle);
     free(toplevel->title);
+    free(toplevel->app_id);
     free(toplevel);
 }
 
@@ -581,13 +605,27 @@ static void on_handle_title(
             log_warn("failed to copy title '%s'", title);
         }
     }
+    update_gui(client);
 }
 
 static void on_handle_app_id(
-    void                                   *UNUSED(data),
-    struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle),
-    const char                             *UNUSED(app_id)
-) {}
+    void                                   *data,
+    struct zwlr_foreign_toplevel_handle_v1 *handle,
+    const char                             *app_id
+) {
+    Client *client = data;
+    Toplevel *toplevel = find_or_add_toplevel(client, handle);
+    if (toplevel) {
+        char *app_id_copy = strdup(app_id);
+        if (app_id_copy) {
+            free(toplevel->app_id);
+            toplevel->app_id = app_id_copy;
+        } else {
+            log_warn("failed to copy app ID '%s'", app_id);
+        }
+    }
+    update_gui(client);
+}
 
 static void on_handle_output_enter(
     void                                   *UNUSED(data),
@@ -608,13 +646,9 @@ static void on_handle_state(
 ) {}
 
 static void on_handle_done(
-    void                                   *data,
+    void                                   *UNUSED(data),
     struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle)
-) {
-    Client *client = data;
-    update_gui(client);
-    rerender(client);
-}
+) {}
 
 static void on_handle_closed(
     void                                   *data,
@@ -636,7 +670,6 @@ static void on_handle_closed(
     }
 
     update_gui(client);
-    rerender(client);
 }
 
 static void on_handle_parent(
@@ -812,6 +845,8 @@ Client *client_init(const char *display, const Config *config) {
     zwlr_foreign_toplevel_manager_v1_add_listener(
         self->toplevel_manager, &toplevel_listener, self);
 
+    self->icons = icons_init();
+
     return self;
 }
 
@@ -826,6 +861,8 @@ void client_run(Client *self) {
 
 void client_deinit(Client *self) {
     free_all_toplevels(self);
+
+    if (self->icons) icons_deinit(self->icons);
 
     if (self->gui) element_destroy(self->gui);
 
