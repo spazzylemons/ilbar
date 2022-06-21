@@ -69,7 +69,7 @@ static void read_config_file(const char *config_path, Config *config) {
     cj_free(NULL, &json);
 }
 
-int main(int argc, char *argv[]) {
+int ilbar_c_main(int argc, char *argv[]) {
     gint dummy_argc = 1;
     gchar *dummy_argv_value[] = { argv[0], NULL };
     gchar **dummy_argv = dummy_argv_value;

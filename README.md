@@ -10,7 +10,7 @@ A simple classic taskbar for Wayland desktops.
 - wayland-client
 - wayland-protocols
 - wayland-scanner
-- A C compiler
+- The latest version of Zig
 
 ## Usage requirements
 
