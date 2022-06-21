@@ -1,6 +1,9 @@
 const IconManager = @import("IconManager.zig");
 const std = @import("std");
 
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub const allocator = gpa.allocator();
+
 extern fn ilbar_c_main(argc: c_int, argv: [*][*:0]u8) c_int;
 
 export fn icons_init() ?*anyopaque {
@@ -26,5 +29,6 @@ export fn icons_get(icons: *IconManager, name: [*:0]const u8) ?*anyopaque {
 }
 
 pub fn main() u8 {
+    defer _ = gpa.deinit();
     return @intCast(u8, ilbar_c_main(@intCast(c_int, std.os.argv.len), std.os.argv.ptr));
 }
