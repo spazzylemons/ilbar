@@ -1,3 +1,4 @@
+#include <gio/gdesktopappinfo.h>
 #include <log.h>
 #include <wayland-util.h>
 
@@ -74,18 +75,28 @@ done:
     return result;
 }
 
-static char *get_icon_name(const char *name) {
+static char *get_icon_name_from_desktop(const char *name) {
+    /* remove possible trailing .desktop */
+    size_t name_length = strlen(name);
+    char *desktop_name;
+    if (name_length > 8 && strcmp(&name[name_length - 8], ".desktop") == 0) {
+        desktop_name = strdup(name);
+    } else {
+        desktop_name = alloc_print("%s.desktop", name);
+    }
+    if (!desktop_name) return NULL;
+
     char *result = NULL;
     /* try local directory first */
     char *xdg_data_home = getenv("XDG_DATA_HOME");
     if (xdg_data_home) {
         result = search_applications(
-            "%s/applications/%s.desktop", 
-            xdg_data_home, name);
+            "%s/applications/%s", 
+            xdg_data_home, desktop_name);
     } else {
         result = search_applications(
-            "%s/local/share/applications/%s.desktop", 
-            getenv("HOME"), name);
+            "%s/local/share/applications/%s", 
+            getenv("HOME"), desktop_name);
     }
     /* try global directories next */
     if (!result) {
@@ -102,11 +113,34 @@ static char *get_icon_name(const char *name) {
                 len = strlen(xdg_data_dirs);
             }
             result = search_applications(
-                "%.*s/applications/%s.desktop", 
-                len, xdg_data_dirs, name);
+                "%.*s/applications/%s", 
+                len, xdg_data_dirs, desktop_name);
             if (!sep) break;
             xdg_data_dirs += len + 1;
         }
+    }
+    free(desktop_name);
+    return result;
+}
+
+static char *get_icon_name(const char *name) {
+    /* try the app id first */
+    char *result = get_icon_name_from_desktop(name);
+    if (result) return result;
+    /* ask gtk for the icon */
+    gchar ***search = g_desktop_app_info_search(name);
+    if (search) {
+        for (gchar ***strv = search; *strv; ++strv) {
+            if (!result) {
+                for (gchar **apps = *strv; *apps; ++apps) {
+                    gchar *app = *apps;
+                    result = get_icon_name_from_desktop(app);
+                    if (result) break;
+                }
+            }
+            g_strfreev(*strv);
+        }
+        g_free(search);
     }
     return result;
 }
@@ -204,6 +238,7 @@ cairo_surface_t *icons_get(IconManager *icons, const char *name) {
             cairo_surface_reference(surface);
             cache_put(icons->cache, key, surface);
         }
+        free(icon_name);
         return surface;
     }
 
