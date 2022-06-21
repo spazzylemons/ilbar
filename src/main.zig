@@ -2,7 +2,7 @@ const IconManager = @import("IconManager.zig");
 const std = @import("std");
 
 comptime {
-    _ = @import("gui.zig");
+    _ = @import("client.zig");
 }
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};

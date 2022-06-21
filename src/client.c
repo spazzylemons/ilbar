@@ -84,55 +84,9 @@ static void on_registry_global_remove(
 static const struct wl_registry_listener registry_listener = {
     .global        = on_registry_global,
     .global_remove = on_registry_global_remove,
-};
+};;
 
-static const struct wl_buffer_listener buffer_listener;
-
-static struct wl_buffer *refresh_pool_buffer(Client *client) {
-    int size = client->width * client->height * 4;
-
-    struct wl_shm_pool *pool =
-        wl_shm_create_pool(client->shm, client->buffer_fd, size);
-    if (!pool) {
-        log_warn("failed to create shm pool");
-        return NULL;
-    }
-
-    uint32_t format = (endian_check.value == 1)
-        ? WL_SHM_FORMAT_BGRX8888
-        : WL_SHM_FORMAT_XRGB8888;
-
-    struct wl_buffer *pool_buffer = wl_shm_pool_create_buffer(
-        pool,
-        0,
-        client->width,
-        client->height,
-        client->width * 4,
-        format);
-    wl_shm_pool_destroy(pool);
-    if (!pool_buffer) {
-        log_warn("failed to create shm pool buffer");
-    } else {
-        wl_buffer_add_listener(pool_buffer, &buffer_listener, client);
-    }
-
-    return pool_buffer;
-}
-
-static void on_buffer_release(
-    void             *data,
-    struct wl_buffer *buffer
-) {
-    Client *client = data;
-    if (buffer == client->pool_buffer) {
-        wl_buffer_destroy(buffer);
-        client->pool_buffer = refresh_pool_buffer(client);
-    }
-}
-
-static const struct wl_buffer_listener buffer_listener = {
-    .release = on_buffer_release,
-};
+struct wl_buffer *refresh_pool_buffer(Client *client);
 
 static int alloc_shm(Client *client, int size) {
     static uint8_t counter = 0;
@@ -202,92 +156,13 @@ static void update_shm(Client *client, uint32_t width, uint32_t height) {
     client->height = height;
 }
 
+void client_rerender(Client *client);
+
 static void rerender(Client *client) {
-    if (client->buffer && client->buffer_fd && client->gui) {
-        if (!client->pool_buffer) {
-            client->pool_buffer = refresh_pool_buffer(client);
-        }
-        if (client->pool_buffer) {
-            element_render_root(client->gui, client);
-            wl_surface_attach(client->wl_surface, client->pool_buffer, 0, 0);
-            wl_surface_commit(client->wl_surface);
-            wl_surface_damage(client->wl_surface,
-                0, 0, client->width, client->height);
-        }
-    }
+    client_rerender(client);
 }
 
-static bool create_taskbar_button(
-    Client *client, Toplevel *toplevel, Element *root, int x) {
-    Element *button = element_init_child(root, &WindowButton);
-    if (button) {
-        button->x = x;
-        button->y = 4;
-        button->width = client->config->width;
-        button->height = client->config->height - 6;
-        button->handle = toplevel->handle;
-        button->seat = client->seat;
-
-        int text_x = client->config->margin;
-        int text_width = client->config->width - (2 * client->config->margin);
-        if (client->icons && toplevel->app_id) {
-            cairo_surface_t *image = icons_get(client->icons, toplevel->app_id);
-            if (image) {
-                Element *icon = element_init_child(button, &Image);
-                if (icon) {
-                    icon->x = client->config->margin;
-                    icon->y = (button->height - 16) / 2;
-                    icon->image = image;
-                    text_x += 16 + client->config->margin;
-                    text_width -= 16 + client->config->margin;
-                } else {
-                    cairo_surface_destroy(image);
-                }
-            }
-        }
-        Element *text = element_init_child(button, &Text);
-        if (text) {
-            text->x = text_x;
-            text->y = (button->height - client->config->font_height) / 2;
-            text->width = text_width;
-            text->height = client->config->font_height;
-            if (toplevel->title) text->text = strdup(toplevel->title);
-        }
-        return true;
-    }
-    element_destroy(button);
-    return false;
-}
-
-static Element *create_gui(Client *client) {
-    Element *root = element_init_root();
-    if (!root) return NULL;
-
-    root->x = 0;
-    root->y = 0;
-    root->width = client->width;
-    root->height = client->height;
-
-    int x = client->config->margin;
-
-    Toplevel *toplevel;
-    wl_list_for_each_reverse(toplevel, &client->toplevels, link) {
-        if (create_taskbar_button(client, toplevel, root, x)) {
-            x += client->config->width + client->config->margin;
-        }
-    }
-
-    return root;
-}
-
-static void update_gui(Client *client) {
-    Element *new_gui = create_gui(client);
-    if (new_gui) {
-        if (client->gui) element_destroy(client->gui);
-        client->gui = new_gui;
-        rerender(client);
-    }
-}
+void update_gui(Client *client);
 
 static void on_surface_configure(
     void                         *data,
@@ -604,7 +479,7 @@ static void free_toplevel(Toplevel *toplevel) {
     free(toplevel);
 }
 
-static void free_all_toplevels(Client *client) {
+void free_all_toplevels(Client *client) {
     Toplevel *toplevel, *tmp;
     wl_list_for_each_safe(toplevel, tmp, &client->toplevels, link) {
         free_toplevel(toplevel);
@@ -672,17 +547,16 @@ static void on_handle_done(
     struct zwlr_foreign_toplevel_handle_v1 *UNUSED(handle)
 ) {}
 
+void destroy_client_gui(Client *client);
+
 static void on_handle_closed(
     void                                   *data,
     struct zwlr_foreign_toplevel_handle_v1 *handle
 ) {
     Client *client = data;
 
-    /* Destroy the GUI to prevet invalid handles */
-    if (client->gui) {
-        element_destroy(client->gui);
-        client->gui = NULL;
-    }
+    /* Destroy the GUI to prevent invalid handles */
+    destroy_client_gui(client);
 
     Toplevel *toplevel = find_toplevel(client, handle);
     if (toplevel) {
@@ -832,76 +706,4 @@ Client *client_init(const char *display, const Config *config) {
     self->icons = icons_init();
 
     return self;
-}
-
-void client_run(Client *self) {
-    while (!self->should_close && wl_display_dispatch(self->display) >= 0);
-
-    int err = wl_display_get_error(self->display);
-    if (err) {
-        log_fatal("disconnected: %s", strerror(err));
-    }
-}
-
-void client_deinit(Client *self) {
-    free_all_toplevels(self);
-
-    if (self->icons) icons_deinit(self->icons);
-
-    if (self->gui) element_destroy(self->gui);
-
-    if (self->pool_buffer) wl_buffer_destroy(self->pool_buffer);
-    if (self->buffer) munmap(self->buffer, self->width * self->height * 4);
-    if (self->buffer_fd >= 0) close(self->buffer_fd);
-
-    if (self->relative_pointer)
-        zwp_relative_pointer_v1_destroy(self->relative_pointer);
-    if (self->pointer) wl_pointer_destroy(self->pointer);
-    if (self->touch) wl_touch_destroy(self->touch);
-
-    if (self->layer_surface) zwlr_layer_surface_v1_destroy(self->layer_surface);
-    if (self->wl_surface) wl_surface_destroy(self->wl_surface);
-
-    if (self->shm) wl_shm_destroy(self->shm);
-    if (self->compositor) wl_compositor_destroy(self->compositor);
-    if (self->layer_shell) zwlr_layer_shell_v1_destroy(self->layer_shell);
-    if (self->seat) wl_seat_destroy(self->seat);
-    if (self->toplevel_manager)
-        zwlr_foreign_toplevel_manager_v1_destroy(self->toplevel_manager);
-    if (self->pointer_manager)
-        zwp_relative_pointer_manager_v1_destroy(self->pointer_manager);
-
-    if (self->display) wl_display_disconnect(self->display);
-
-    free(self);
-}
-
-void client_press(Client *self) {
-    if (self->gui && !self->mouse_down) {
-        element_press(
-            self->gui,
-            wl_fixed_to_int(self->mouse_x),
-            wl_fixed_to_int(self->mouse_y));
-    }
-    self->mouse_down = true;
-    rerender(self);
-}
-
-void client_motion(Client *self) {
-    if (self->gui) {
-        element_motion(
-            self->gui,
-            wl_fixed_to_int(self->mouse_x),
-            wl_fixed_to_int(self->mouse_y));
-    }
-
-    rerender(self);
-}
-
-void client_release(Client *self) {
-    if (self->gui && self->mouse_down) {
-        element_release(self->gui);
-    }
-    self->mouse_down = false;
-    rerender(self);
 }
