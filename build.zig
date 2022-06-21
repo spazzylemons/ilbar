@@ -104,7 +104,7 @@ pub fn build(b: *std.build.Builder) !void {
         "src/client.c",
         "src/config.c",
         "src/gui.c",
-        "src/icons.c",
+        // "src/icons.c",
         "src/main.c",
         "src/util.c",
 

@@ -6,12 +6,7 @@
 #include "cache.h"
 
 /** Fetches icons using GTK. */
-typedef struct {
-    /** A reference to the default theme. */
-    GtkIconTheme *theme;
-    /** A cache of recently used icons. */
-    Cache *cache;
-} IconManager;
+typedef struct IconManager IconManager;
 
 /** Construct a new icon manager. */
 IconManager *icons_init(void);
