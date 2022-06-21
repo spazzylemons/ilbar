@@ -75,6 +75,7 @@ executable(
   'ilbar',
 
   sources: files(
+    'src/cache.c',
     'src/client.c',
     'src/config.c',
     'src/gui.c',

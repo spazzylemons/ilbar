@@ -4,13 +4,39 @@
 #include "icons.h"
 #include "util.h"
 
+#define ICON_CACHE_SIZE 29
+
+static size_t icon_cache_hash(const void *key) {
+    const char *str = key;
+    size_t result = 0;
+    while (*str) {
+        result <<= 8;
+        result |= *str++;
+    }
+    return result;
+}
+
+static bool icon_cache_equal(const void *a, const void *b) {
+    return strcmp(a, b) == 0;
+}
+
+static void icon_cache_free(const CacheEntry *entry) {
+    free(entry->key);
+    cairo_surface_destroy(entry->value);
+}
+
+static const CacheCallbacks icon_cache_callbacks = {
+    .hash = icon_cache_hash,
+    .equal = icon_cache_equal,
+    .free = icon_cache_free,
+};
+
 /** Search a .desktop file for an icon. */
 static char *search_applications(const char *fmt, ...) {
     va_list arg;
     va_start(arg, fmt);
     char *filename = alloc_vprint(fmt, arg);
     va_end(arg);
-    printf("[%s]\n", filename);
     if (!filename) return NULL;
     FILE *file = fopen(filename, "r");
     free(filename);
@@ -88,13 +114,21 @@ static char *get_icon_name(const char *name) {
 IconManager *icons_init(void) {
     IconManager *icons = malloc(sizeof(IconManager));
     if (!icons) {
-        log_error("failed to allocate icon manager");
+        log_warn("failed to allocate icon manager");
+        return NULL;
+    }
+
+    icons->cache = cache_init(ICON_CACHE_SIZE, &icon_cache_callbacks);
+    if (!icons->cache) {
+        log_warn("failed to create icon cache");
+        free(icons);
         return NULL;
     }
 
     icons->theme = gtk_icon_theme_get_default();
     if (!icons->theme) {
-        log_error("failed to get icon theme");
+        log_warn("failed to get icon theme");
+        cache_deinit(icons->cache);
         free(icons);
         return NULL;
     }
@@ -105,33 +139,39 @@ IconManager *icons_init(void) {
 }
 
 void icons_deinit(IconManager *icons) {
+    cache_deinit(icons->cache);
     g_object_unref(icons->theme);
     free(icons);
 }
 
 cairo_surface_t *icons_get(IconManager *icons, const char *name) {
+    cairo_surface_t *surface = cache_get(icons->cache, name);
+    if (surface) {
+        cairo_surface_reference(surface);
+        return surface;
+    }
     char *icon_name = get_icon_name(name);
     if (!icon_name) {
-        log_error("failed to find icon for app ID %s", name);
+        log_warn("failed to find icon for app ID %s", name);
         return NULL;
     }
+
     GdkPixbuf *pixbuf = gtk_icon_theme_load_icon(
         icons->theme, icon_name, 16, 0, NULL);
     if (!pixbuf) {
-        log_error("icon %s not found", icon_name);
+        log_warn("icon %s not found", icon_name);
         free(icon_name);
         return NULL;
     }
-    free(icon_name);
 
     if (gdk_pixbuf_get_colorspace(pixbuf) != GDK_COLORSPACE_RGB) {
-        log_error("icon is not in RGB colorspace");
+        log_warn("icon is not in RGB colorspace");
     } else if (gdk_pixbuf_get_bits_per_sample(pixbuf) != 8) {
-        log_error("icon is not 8bpp");
+        log_warn("icon is not 8bpp");
     } else if (!gdk_pixbuf_get_has_alpha(pixbuf)) {
-        log_error("icon does not have alpha channel");
+        log_warn("icon does not have alpha channel");
     } else if (gdk_pixbuf_get_n_channels(pixbuf) != 4) {
-        log_error("icon does not have 4 channels");
+        log_warn("icon does not have 4 channels");
     } else {
         int width = gdk_pixbuf_get_width(pixbuf);
         int height = gdk_pixbuf_get_height(pixbuf);
@@ -142,8 +182,9 @@ cairo_surface_t *icons_get(IconManager *icons, const char *name) {
         cairo_surface_flush(surface);
         uint32_t *dst = (void*) cairo_image_surface_get_data(surface);
         if (!dst) {
-            log_error("failed to create icon surface");
+            log_warn("failed to create icon surface");
             cairo_surface_destroy(surface);
+            free(icon_name);
             g_object_unref(pixbuf);
             return NULL;
         }
@@ -158,9 +199,15 @@ cairo_surface_t *icons_get(IconManager *icons, const char *name) {
         }
         cairo_surface_mark_dirty(surface);
         g_object_unref(pixbuf);
+        char *key = strdup(name);
+        if (key) {
+            cairo_surface_reference(surface);
+            cache_put(icons->cache, key, surface);
+        }
         return surface;
     }
 
+    free(icon_name);
     g_object_unref(pixbuf);
     return NULL;
 }

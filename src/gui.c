@@ -97,7 +97,9 @@ const ElementClass Text = {
 };
 
 static void image_free(Element *self) {
-    cairo_surface_destroy(self->image);
+    if (self->image) {
+        cairo_surface_destroy(self->image);
+    }
 }
 
 static void image_render(Element *self, cairo_t *cr) {

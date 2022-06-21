@@ -16,8 +16,6 @@
 #include "client.h"
 #include "util.h"
 
-#define NUM_INTERFACES 6
-
 struct {
     uint8_t bytes[2];
     uint16_t value;
@@ -30,8 +28,27 @@ typedef struct {
     /** The minimum supported version. */
     uint32_t version;
     /** The location to store the interface. */
-    void **out;
+    size_t offset;
 } InterfaceSpec;
+
+const InterfaceSpec specs[] = {
+    { &wl_shm_interface,                           1,
+        offsetof(Client, shm) },
+    { &wl_compositor_interface,                    4,
+        offsetof(Client, compositor) },
+    { &zwlr_layer_shell_v1_interface,              4,
+        offsetof(Client, layer_shell) },
+    { &wl_seat_interface,                          7,
+        offsetof(Client, seat) },
+    { &zwlr_foreign_toplevel_manager_v1_interface, 3,
+        offsetof(Client, toplevel_manager) },
+    { &zwp_relative_pointer_manager_v1_interface,  1,
+        offsetof(Client, pointer_manager) },
+    { NULL },
+};
+
+#define SPEC_PTR(_spec_, _client_) \
+    (*((void**) (void*) &((char*) (void*) _client_)[_spec_->offset]))
 
 static void on_registry_global(
     void               *data,
@@ -40,12 +57,11 @@ static void on_registry_global(
     const char         *interface,
     uint32_t            version
 ) {
-    const InterfaceSpec *specs = data;
-    for (int i = 0; i < NUM_INTERFACES; ++i) {
-        const InterfaceSpec *spec = &specs[i];
+    Client *client = data;
+    for (const InterfaceSpec *spec = specs; spec->interface; ++spec) {
         if (strcmp(interface, spec->interface->name) == 0) {
             if (version >= spec->version) {
-                *spec->out = wl_registry_bind(
+                SPEC_PTR(spec, client) = wl_registry_bind(
                     registry,
                     name,
                     spec->interface,
@@ -122,16 +138,22 @@ static int alloc_shm(Client *client, int size) {
     static uint8_t counter = 0;
     /* create shm file name using various factors to avoid collision */
     pid_t pid = getpid();
-    int n = snprintf(
-        NULL, 0, "/ilbar-shm-%d-%p-%d", pid, (void*) client, counter) + 1;
-    char name[n];
-    snprintf(name, n, "/ilbar-shm-%d-%p-%d", pid, (void*) client, counter++);
+    char *name = alloc_print(
+        "/ilbar-shm-%d-%p-%d", pid, (void*) client, counter);
+    if (!name) {
+        log_warn("failed to allocate shm file name");
+        return -1;
+    }
     log_info("opening new shm file: %s", name);
     /* open a shared memory file */
     int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        free(name);
+        return -1;
+    }
     /* file should cease to exist when we're done with it */
     shm_unlink(name);
+    free(name);
     /* allocate buffer */
     while (ftruncate(fd, size) < 0) {
         if (errno != EINTR) {
@@ -747,45 +769,7 @@ Client *client_init(const char *display, const Config *config) {
         return NULL;
     }
 
-    InterfaceSpec specs[NUM_INTERFACES] = {
-        {
-            .interface = &wl_shm_interface,
-            .version = 1,
-            .out = (void**) (void*) &self->shm,
-        },
-
-        {
-            .interface = &wl_compositor_interface,
-            .version = 4,
-            .out = (void**) (void*) &self->compositor,
-        },
-
-        {
-            .interface = &zwlr_layer_shell_v1_interface,
-            .version = 4,
-            .out = (void**) (void*) &self->layer_shell,
-        },
-
-        {
-            .interface = &wl_seat_interface,
-            .version = 7,
-            .out = (void**) (void*) &self->seat,
-        },
-
-        {
-            .interface = &zwlr_foreign_toplevel_manager_v1_interface,
-            .version = 3,
-            .out = (void**) (void*) &self->toplevel_manager,
-        },
-
-        {
-            .interface = &zwp_relative_pointer_manager_v1_interface,
-            .version = 1,
-            .out = (void**) (void*) &self->pointer_manager,
-        }
-    };
-
-    wl_registry_add_listener(registry, &registry_listener, &specs);
+    wl_registry_add_listener(registry, &registry_listener, self);
     if (wl_display_roundtrip(self->display) < 0) {
         log_error("failed to perform roundtrip");
         wl_registry_destroy(registry);
@@ -794,10 +778,10 @@ Client *client_init(const char *display, const Config *config) {
     }
 
     bool bad_interfaces = false;
-    for (int i = 0; i < NUM_INTERFACES; ++i) {
-        if (!*specs[i].out) {
+    for (const InterfaceSpec *spec = specs; spec->interface; ++spec) {
+        if (!SPEC_PTR(spec, self)) {
             log_error("interface %s is unavailable or not new enough",
-                specs[i].interface->name);
+                spec->interface->name);
             bad_interfaces = true;
         }
     }
