@@ -10,17 +10,7 @@
 #include "gui.h"
 #include "icons.h"
 
-/** An open toplevel window. */
-typedef struct {
-    /** Intrusive list */
-    struct wl_list link;
-    /** The window handle. */
-    struct zwlr_foreign_toplevel_handle_v1 *handle;
-    /** The last seen title as an owned copy. */
-    char *title;
-    /** The last seen app ID as an owned copy. */
-    char *app_id;
-} Toplevel;
+typedef struct ToplevelList ToplevelList;
 
 /** The interface to Wayland. */
 typedef struct Client {
@@ -65,7 +55,7 @@ typedef struct Client {
     /** If true, the mouse is considered pressed. */
     bool mouse_down;
     /** A list of toplevel info. */
-    struct wl_list toplevels;
+    ToplevelList *toplevel_list;
     /** The GUI tree. */
     Element *gui;
     /** The icon manager. */

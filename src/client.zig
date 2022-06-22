@@ -3,10 +3,12 @@ const c = @import("c.zig");
 const Element = @import("Element.zig");
 const IconManager = @import("IconManager.zig");
 const std = @import("std");
+const Toplevel = @import("Toplevel.zig");
 
 extern fn strerror(errnum: c_int) [*:0]u8;
 extern fn free_all_toplevels(self: *c.Client) void;
 extern fn icons_deinit(icons: *c.IconManager) void;
+extern fn toplevel_list_deinit(list: *c.ToplevelList) void;
 
 fn refreshPoolBuffer(self: *c.Client) !*c.wl_buffer {
     const size = self.width * self.height * 4;
@@ -66,7 +68,7 @@ export fn client_rerender(self: *c.Client) void {
     }
 }
 
-fn createTaskbarButton(self: *c.Client, toplevel: *c.Toplevel, root: *Element, x: c_int) !void {
+fn createTaskbarButton(self: *c.Client, toplevel: *Toplevel, root: *Element, x: c_int) !void {
     const button = try root.initChild(&Element.window_button_class);
     errdefer button.deinit();
 
@@ -75,7 +77,7 @@ fn createTaskbarButton(self: *c.Client, toplevel: *c.Toplevel, root: *Element, x
     button.width = self.config.*.width;
     button.height = self.config.*.height - 6;
     button.data = .{ .window_button = .{
-        .handle = toplevel.handle.?,
+        .handle = toplevel.handle,
         .seat = self.seat.?,
     } };
 
@@ -84,7 +86,7 @@ fn createTaskbarButton(self: *c.Client, toplevel: *c.Toplevel, root: *Element, x
     if (self.icons) |icons_ptr| {
         const icons = @ptrCast(*IconManager, @alignCast(@alignOf(IconManager), icons_ptr));
         if (toplevel.app_id) |app_id| {
-            if (icons.get(std.mem.span(app_id)) catch null) |image| {
+            if (icons.get(app_id) catch null) |image| {
                 errdefer c.cairo_surface_destroy(image);
                 const icon = try button.initChild(&Element.image_class);
                 icon.x = self.config.*.margin;
@@ -101,7 +103,7 @@ fn createTaskbarButton(self: *c.Client, toplevel: *c.Toplevel, root: *Element, x
     text.width = text_width;
     text.height = @floatToInt(c_int, self.config.*.font_height);
     if (toplevel.title) |title| {
-        text.data = .{ .text = try allocator.dupeZ(u8, std.mem.span(title)) };
+        text.data = .{ .text = try allocator.dupeZ(u8, title) };
     } else {
         text.data = .{ .text = null };
     }
@@ -113,14 +115,15 @@ fn createGui(self: *c.Client) !*Element {
     root.height = @intCast(c_int, self.height);
     var x = self.config.*.margin;
 
-    var toplevel = @fieldParentPtr(c.Toplevel, "link", self.toplevels.prev.?);
-    while (&toplevel.link != &self.toplevels) {
-        if (createTaskbarButton(self, toplevel, root, x)) |_| {
+    var list = @ptrCast(*Toplevel.List, @alignCast(@alignOf(Toplevel), self.toplevel_list.?));
+    var it = list.list.first;
+    while (it) |node| {
+        if (createTaskbarButton(self, &node.data, root, x)) |_| {
             x += self.config.*.width + self.config.*.margin;
         } else |err| {
             std.log.warn("failed to create a taskbar button: {}", .{err});
         }
-        toplevel = @fieldParentPtr(c.Toplevel, "link", toplevel.link.prev.?);
+        it = node.next;
     }
 
     return root;
@@ -143,7 +146,7 @@ export fn update_gui(self: *c.Client) void {
 }
 
 export fn client_deinit(self: *c.Client) void {
-    free_all_toplevels(self);
+    if (self.toplevel_list) |x| toplevel_list_deinit(x);
 
     if (self.icons) |x| icons_deinit(x);
 
