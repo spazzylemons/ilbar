@@ -6,9 +6,9 @@ const std = @import("std");
 const Element = @This();
 
 const Class = struct {
-    freeData: ?fn(self: *Element) void = null,
-    release: ?fn(self: *Element) void = null,
-    render: ?fn(self: *Element, cr: *c.cairo_t) void = null,
+    freeData: ?fn (self: *Element) void = null,
+    release: ?fn (self: *Element) void = null,
+    render: ?fn (self: *Element, cr: *c.cairo_t) void = null,
 };
 
 fn makeClass(comptime T: type) Class {

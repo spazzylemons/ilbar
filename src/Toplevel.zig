@@ -115,7 +115,7 @@ pub const List = struct {
                 .node = node,
                 .handle = handle,
                 .title = null,
-              .app_id = null,
+                .app_id = null,
             },
         };
         self.list.append(node);

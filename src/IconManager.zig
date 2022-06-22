@@ -33,8 +33,7 @@ pub fn init() !IconManager {
     const cache = try Cache.init(ICON_CACHE_SIZE);
     errdefer cache.deinit();
 
-    const theme = c.gtk_icon_theme_get_default()
-        orelse return error.GtkError;
+    const theme = c.gtk_icon_theme_get_default() orelse return error.GtkError;
     // the theme is not automatically ref'd
     _ = c.g_object_ref(theme);
 
@@ -91,20 +90,19 @@ fn getIconNameFromDesktop(name: []const u8) !?[:0]u8 {
     defer allocator.free(desktop_name);
     // try local directory first
     if (std.c.getenv("XDG_DATA_HOME")) |v| {
-        if (try searchApplications("{s}/applications/{s}", .{v, desktop_name})) |result| {
+        if (try searchApplications("{s}/applications/{s}", .{ v, desktop_name })) |result| {
             return result;
         }
     } else if (std.c.getenv("HOME")) |v| {
-        if (try searchApplications("{s}/.local/share/applications/{s}", .{v, desktop_name})) |result| {
+        if (try searchApplications("{s}/.local/share/applications/{s}", .{ v, desktop_name })) |result| {
             return result;
         }
     }
     // try global directories next
-    const xdg_data_dirs: [*:0]const u8 = std.c.getenv("XDG_DAtA_DIRS")
-        orelse "/usr/local/share:/usr/share";
+    const xdg_data_dirs: [*:0]const u8 = std.c.getenv("XDG_DAtA_DIRS") orelse "/usr/local/share:/usr/share";
     var it = std.mem.split(u8, std.mem.span(xdg_data_dirs), ":");
     while (it.next()) |dir| {
-        if (try searchApplications("{s}/applications/{s}", .{dir, desktop_name})) |result| {
+        if (try searchApplications("{s}/applications/{s}", .{ dir, desktop_name })) |result| {
             return result;
         }
     }
@@ -118,8 +116,7 @@ fn getIconName(name: [:0]const u8) !?[:0]u8 {
         return result;
     }
     // ask GTK for the icon
-    const search = c.g_desktop_app_info_search(name.ptr)
-        orelse return error.GtkError;
+    const search = c.g_desktop_app_info_search(name.ptr) orelse return error.GtkError;
     defer {
         var strv = search;
         while (strv.* != null) : (strv += 1) {
@@ -149,8 +146,7 @@ pub fn get(self: *IconManager, name: [:0]const u8) !?*c.cairo_surface_t {
     const icon_name = (try getIconName(name)) orelse return null;
     defer allocator.free(icon_name);
 
-    const pixbuf = c.gtk_icon_theme_load_icon(self.theme, icon_name, 16, 0, null)
-        orelse return error.IconNotFound;
+    const pixbuf = c.gtk_icon_theme_load_icon(self.theme, icon_name, 16, 0, null) orelse return error.IconNotFound;
     errdefer c.g_object_unref(pixbuf);
 
     if (c.gdk_pixbuf_get_colorspace(pixbuf) != c.GDK_COLORSPACE_RGB) {
@@ -173,8 +169,7 @@ pub fn get(self: *IconManager, name: [:0]const u8) !?*c.cairo_surface_t {
         ).?;
         errdefer c.cairo_surface_destroy(surface);
         c.cairo_surface_flush(surface);
-        var dst = @ptrCast([*]align(1)u32, c.cairo_image_surface_get_data(surface)
-            orelse return error.CairoError);
+        var dst = @ptrCast([*]align(1) u32, c.cairo_image_surface_get_data(surface) orelse return error.CairoError);
         const size = width * height;
         var i: c_int = 0;
         while (i < size) : (i += 1) {

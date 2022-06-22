@@ -16,12 +16,8 @@ fn runCommand(b: *std.build.Builder, argv: []const []const u8) []u8 {
     return result.stdout;
 }
 
-fn pkgConfig(
-    b: *std.build.Builder,
-    obj: *std.build.LibExeObjStep,
-    name: []const u8
-) void {
-    const result = runCommand(b, &.{"pkg-config", "--cflags", "--libs", name});
+fn pkgConfig(b: *std.build.Builder, obj: *std.build.LibExeObjStep, name: []const u8) void {
+    const result = runCommand(b, &.{ "pkg-config", "--cflags", "--libs", name });
     defer b.allocator.free(result);
     var it = std.mem.tokenize(u8, result[0 .. result.len - 1], " ");
     while (it.next()) |slice| {
@@ -122,13 +118,13 @@ pub fn build(b: *std.build.Builder) !void {
 
     const pkgdatadir_full = runCommand(
         b,
-        &.{"pkg-config", "--variable=pkgdatadir", "wayland-protocols"},
+        &.{ "pkg-config", "--variable=pkgdatadir", "wayland-protocols" },
     );
     defer b.allocator.free(pkgdatadir_full);
     const pkgdatadir = pkgdatadir_full[0 .. pkgdatadir_full.len - 1];
 
     const protocol_xml = [_][]const u8{
-        b.pathJoin(&.{pkgdatadir, "stable/xdg-shell/xdg-shell"}),
+        b.pathJoin(&.{ pkgdatadir, "stable/xdg-shell/xdg-shell" }),
         "lib/wlr-foreign-toplevel-management-unstable-v1",
         "lib/wlr-layer-shell-unstable-v1",
     };

@@ -28,7 +28,7 @@ wl_surface: *c.wl_surface,
 /// Current layer surface object
 layer_surface: *c.zwlr_layer_surface_v1,
 /// The current pixel buffer, or bull if not currently allocated.
-buffer: ?[]align(std.mem.page_size)u8 = null,
+buffer: ?[]align(std.mem.page_size) u8 = null,
 /// The buffer file descriptor, or -1 if not currently opened.
 buffer_fd: std.c.fd_t = -1,
 /// The currnt shm pool buffer, or bull if not currently allocated.
@@ -240,10 +240,11 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     ) orelse return error.WaylandError;
     errdefer c.zwlr_layer_surface_v1_destroy(layer_surface);
 
-    c.zwlr_layer_surface_v1_set_anchor(layer_surface,
+    c.zwlr_layer_surface_v1_set_anchor(
+        layer_surface,
         c.ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
-        c.ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
-        c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM,
+            c.ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+            c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM,
     );
     c.zwlr_layer_surface_v1_set_size(layer_surface, 0, @intCast(u32, config.height));
     c.zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, @intCast(i32, config.height));
@@ -410,8 +411,7 @@ const buffer_listener = util.createListener(c.wl_buffer_listener, struct {
 
 fn refreshPoolBuffer(self: *Client) !*c.wl_buffer {
     const size = self.width * self.height * 4;
-    const pool = c.wl_shm_create_pool(self.shm, self.buffer_fd, @intCast(i32, size))
-        orelse return error.WaylandError;
+    const pool = c.wl_shm_create_pool(self.shm, self.buffer_fd, @intCast(i32, size)) orelse return error.WaylandError;
     defer c.wl_shm_pool_destroy(pool);
     const format: u32 = switch (@import("builtin").target.cpu.arch.endian()) {
         .Big => c.WL_SHM_FORMAT_BGRX8888,
