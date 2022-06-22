@@ -1,10 +1,9 @@
 const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
+const Client = @import("Client.zig");
 const std = @import("std");
 
 const PointerManager = @This();
-
-client: *c.Client,
 
 pointer: ?*c.wl_pointer = null,
 touch: ?*c.wl_touch = null,
@@ -27,7 +26,7 @@ fn onPointerEnter(
     const manager = unwrap(data);
     manager.x = c.wl_fixed_to_int(x);
     manager.y = c.wl_fixed_to_int(y);
-    c.client_motion(manager.client);
+    manager.client().motion();
 }
 
 fn onPointerLeave(
@@ -54,7 +53,7 @@ fn onPointerMotion(
     const manager = unwrap(data);
     manager.x = c.wl_fixed_to_int(x);
     manager.y = c.wl_fixed_to_int(y);
-    c.client_motion(manager.client);
+    manager.client().motion();
 }
 
 fn onPointerButton(
@@ -71,9 +70,9 @@ fn onPointerButton(
     const manager = unwrap(data);
     if (button == c.BTN_LEFT) {
         if (state == c.WL_POINTER_BUTTON_STATE_PRESSED) {
-            c.client_press(manager.client);
+            manager.client().press();
         } else {
-            c.client_release(manager.client);
+            manager.client().release();
         }
     }
 }
@@ -157,7 +156,7 @@ fn onTouchDown(
     const manager = unwrap(data);
     manager.x = c.wl_fixed_to_int(x);
     manager.y = c.wl_fixed_to_int(y);
-    c.client_press(manager.client);
+    manager.client().press();
 }
 
 fn onTouchUp(
@@ -172,7 +171,7 @@ fn onTouchUp(
     _ = time;
     _ = id;
     const manager = unwrap(data);
-    c.client_release(manager.client);
+    manager.client().release();
 }
 
 fn onTouchMotion(
@@ -189,7 +188,7 @@ fn onTouchMotion(
     const manager = unwrap(data);
     manager.x = c.wl_fixed_to_int(x);
     manager.y = c.wl_fixed_to_int(y);
-    c.client_motion(manager.client);
+    manager.client().motion();
 }
 
 fn onTouchFrameOrCancel(data: ?*anyopaque, touch: ?*c.wl_touch) callconv(.C) void {
@@ -270,9 +269,19 @@ const seat_listener = c.wl_seat_listener{
     .name = onName,
 };
 
-pub fn init(client: *c.Client) !*PointerManager {
-    const self = try allocator.create(PointerManager);
-    self.* = .{ .client = client };
-    _ = c.wl_seat_add_listener(client.seat, &seat_listener, self);
-    return self;
+pub fn init(self: *PointerManager) void {
+    _ = c.wl_seat_add_listener(self.client().seat, &seat_listener, self);
+}
+
+pub fn deinit(self: *PointerManager) void {
+    if (self.pointer) |pointer| {
+        c.wl_pointer_destroy(pointer);
+    }
+    if (self.touch) |touch| {
+        c.wl_touch_destroy(touch);
+    }
+}
+
+inline fn client(self: *PointerManager) *Client {
+    return @fieldParentPtr(Client, "pointer_manager", self);
 }

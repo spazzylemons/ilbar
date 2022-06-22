@@ -1,5 +1,6 @@
 const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
+const Client = @import("Client.zig");
 const std = @import("std");
 
 const Toplevel = @This();
@@ -15,15 +16,6 @@ app_id: ?[:0]const u8,
 
 inline fn unwrapList(data: ?*anyopaque) *List {
     return @ptrCast(*List, @alignCast(@alignOf(List), data.?));
-}
-
-export fn toplevel_list_init(client: *c.Client) ?*List {
-    return List.init(client) catch return null;
-}
-
-export fn toplevel_list_deinit(list: *List) void {
-    list.clear();
-    allocator.destroy(list);
 }
 
 fn onTitle(
@@ -42,7 +34,7 @@ fn onTitle(
     };
     if (toplevel.title) |old_title| allocator.free(old_title);
     toplevel.title = copy;
-    update_gui(list.client);
+    list.getClient().updateGui();
 }
 
 fn onAppId(
@@ -61,7 +53,7 @@ fn onAppId(
     };
     if (toplevel.app_id) |old_app_id| allocator.free(old_app_id);
     toplevel.app_id = copy;
-    update_gui(list.client);
+    list.getClient().updateGui();
 }
 
 fn onOutput(
@@ -84,9 +76,6 @@ fn onState(
     _ = state;
 }
 
-extern fn update_gui(client: *c.Client) void;
-extern fn destroy_client_gui(client: *c.Client) void;
-
 fn onDone(
     data: ?*anyopaque,
     handle: ?*c.zwlr_foreign_toplevel_handle_v1,
@@ -100,7 +89,10 @@ fn onClosed(
     handle: ?*c.zwlr_foreign_toplevel_handle_v1,
 ) callconv(.C) void {
     const list = unwrapList(data);
-    destroy_client_gui(list.client);
+    if (list.getClient().gui) |gui| {
+        gui.deinit();
+        list.getClient().gui = null;
+    }
 
     if (list.find(handle.?)) |toplevel| {
         list.remove(toplevel);
@@ -108,7 +100,7 @@ fn onClosed(
         c.zwlr_foreign_toplevel_handle_v1_destroy(handle);
     }
 
-    update_gui(list.client);
+    list.getClient().updateGui();
 }
 
 fn onParent(
@@ -162,18 +154,21 @@ const toplevel_listener = c.zwlr_foreign_toplevel_manager_v1_listener{
 };
 
 pub const List = struct {
-    client: *c.Client,
+    toplevel_manager: *c.zwlr_foreign_toplevel_manager_v1 = undefined,
     list: std.TailQueue(Toplevel) = .{},
 
-    pub fn init(client: *c.Client) !*List {
-        const self = try allocator.create(List);
-        self.* = .{ .client = client };
+    pub fn init(self: *List, toplevel_manager: *c.zwlr_foreign_toplevel_manager_v1) void {
+        self.toplevel_manager = toplevel_manager;
         _ = c.zwlr_foreign_toplevel_manager_v1_add_listener(
-            client.toplevel_manager.?,
+            toplevel_manager,
             &toplevel_listener,
             self,
         );
-        return self;
+    }
+
+    pub fn deinit(self: *List) void {
+        self.clear();
+        c.zwlr_foreign_toplevel_manager_v1_destroy(self.toplevel_manager);
     }
 
     pub fn add(self: *List, handle: *c.zwlr_foreign_toplevel_handle_v1) !*Toplevel {
@@ -217,5 +212,9 @@ pub const List = struct {
             it = node.next;
             self.remove(&node.data);
         }
+    }
+
+    inline fn getClient(self: *List) *Client {
+        return @fieldParentPtr(Client, "toplevel_list", self);
     }
 };

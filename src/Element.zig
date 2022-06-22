@@ -1,5 +1,6 @@
 const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
+const Client = @import("Client.zig");
 const std = @import("std");
 
 const Element = @This();
@@ -249,9 +250,9 @@ pub fn renderChild(self: *Element, cr: *c.cairo_t) void {
     }
 }
 
-pub fn render(self: *Element, client: *c.Client) void {
+pub fn render(self: *Element, client: *Client) void {
     const surface = c.cairo_image_surface_create_for_data(
-        client.buffer,
+        client.buffer.?.ptr,
         c.CAIRO_FORMAT_ARGB32,
         @intCast(c_int, client.width),
         @intCast(c_int, client.height),
@@ -263,11 +264,11 @@ pub fn render(self: *Element, client: *c.Client) void {
 
     c.cairo_select_font_face(
         cr,
-        client.config.*.font,
+        client.config.font,
         c.CAIRO_FONT_SLANT_NORMAL,
         c.CAIRO_FONT_WEIGHT_NORMAL,
     );
-    c.cairo_set_font_size(cr, @intToFloat(f64, client.config.*.font_size));
+    c.cairo_set_font_size(cr, @intToFloat(f64, client.config.font_size));
     c.cairo_set_antialias(cr, c.CAIRO_ANTIALIAS_NONE);
     c.cairo_set_line_width(cr, 1);
 

@@ -1,28 +1,10 @@
 const c = @import("c.zig");
+const Client = @import("Client.zig");
 const IconManager = @import("IconManager.zig");
 const std = @import("std");
 
-comptime {
-    _ = @import("client.zig");
-}
-
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
-
-export fn icons_init() ?*anyopaque {
-    const result = std.heap.c_allocator.create(IconManager) catch return null;
-    result.* = IconManager.init() catch |err| {
-        std.log.err("icons_init(): {}", .{err});
-        std.heap.c_allocator.destroy(result);
-        return null;
-    };
-    return result;
-}
-
-export fn icons_deinit(icons: *IconManager) void {
-    icons.deinit();
-    std.heap.c_allocator.destroy(icons);
-}
 
 fn openConfigFile(path: ?[*:0]u8) !*std.c.FILE {
     var generated: ?[:0]u8 = null;
@@ -130,10 +112,13 @@ pub fn main() u8 {
         std.log.err("error reading config file: {}", .{err});
     };
     c.config_process(&config);
-    const client = c.client_init(display, &config) orelse {
+
+    const client = Client.init(display, &config) catch |err| {
+        std.log.err("failed to create client: {}", .{err});
         return 1;
     };
-    defer c.client_deinit(client);
-    c.client_run(client);
+    defer client.deinit();
+    client.run();
+
     return 0;
 }
