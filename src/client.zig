@@ -232,3 +232,84 @@ export fn client_release(self: *c.Client) void {
     }
     getPtrManager(self).?.down = false;
 }
+
+var shm_counter: u8 = 0;
+
+fn allocShm(client: *c.Client, size: usize) !std.os.fd_t {
+    const pid = std.os.linux.getpid();
+    const name = try std.fmt.allocPrintZ(allocator, "/ilbar-shm-{}-{x}-{}", .{
+        pid,
+        @ptrToInt(client),
+        shm_counter,
+    });
+    std.log.info("opening new shm file: {s}", .{name});
+    defer allocator.free(name);
+    shm_counter += 1;
+
+    const fd = std.c.shm_open(name, std.os.O.RDWR | std.os.O.CREAT | std.os.O.EXCL, 0o600);
+    if (fd < 0) return error.ShmError;
+    errdefer std.os.close(fd);
+    _ = std.c.shm_unlink(name);
+
+    if (std.c.ftruncate(fd, @intCast(std.c.off_t, size)) < 0) {
+        return error.ShmError;
+    }
+
+    return fd;
+}
+
+fn updateShm(client: *c.Client, width: u32, height: u32) !void {
+    const new_size = try std.math.mul(u32, try std.math.mul(u32, width, height), 4);
+    const old_size = client.width * client.height * 4;
+    if (old_size == new_size) return;
+    const fd = try allocShm(client, new_size);
+    errdefer std.os.close(fd);
+    const buffer = try std.os.mmap(
+        null,
+        new_size,
+        std.os.PROT.READ | std.os.PROT.WRITE,
+        std.os.MAP.SHARED,
+        fd,
+        0,
+    );
+    if (client.buffer) |b| {
+        std.os.munmap(@alignCast(4096, b)[0..old_size]);
+    }
+    client.buffer = buffer.ptr;
+    if (client.buffer_fd >= 0) {
+        std.os.close(client.buffer_fd);
+    }
+    client.buffer_fd = fd;
+    client.width = width;
+    client.height = height;
+}
+
+fn onConfigure(
+    data: ?*anyopaque,
+    surface: ?*c.zwlr_layer_surface_v1,
+    serial: u32,
+    width: u32,
+    height: u32,
+) callconv(.C) void {
+    const client = @ptrCast(*c.Client, @alignCast(@alignOf(c.Client), data.?));
+    c.zwlr_layer_surface_v1_ack_configure(surface, serial);
+    updateShm(client, width, height) catch {};
+    update_gui(client);
+}
+
+fn onClosed(data: ?*anyopaque, surface: ?*c.zwlr_layer_surface_v1) callconv(.C) void {
+    const client = @ptrCast(*c.Client, @alignCast(@alignOf(c.Client), data.?));
+    if (surface == client.layer_surface) {
+        std.log.info("surface was closed, shutting down", .{});
+        client.should_close = true;
+    }
+}
+
+const surface_listener = c.zwlr_layer_surface_v1_listener{
+    .configure = onConfigure,
+    .closed = onClosed,
+};
+
+export fn add_surface_listener(self: *c.Client) void {
+    _ = c.zwlr_layer_surface_v1_add_listener(self.layer_surface, &surface_listener, self);
+}

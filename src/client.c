@@ -78,117 +78,11 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = on_registry_global_remove,
 };;
 
-struct wl_buffer *refresh_pool_buffer(Client *client);
-
-static int alloc_shm(Client *client, int size) {
-    static uint8_t counter = 0;
-    /* create shm file name using various factors to avoid collision */
-    pid_t pid = getpid();
-    char *name = alloc_print(
-        "/ilbar-shm-%d-%p-%d", pid, (void*) client, counter);
-    if (!name) {
-        log_warn("failed to allocate shm file name");
-        return -1;
-    }
-    log_info("opening new shm file: %s", name);
-    /* open a shared memory file */
-    int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
-    if (fd < 0) {
-        free(name);
-        return -1;
-    }
-    /* file should cease to exist when we're done with it */
-    shm_unlink(name);
-    free(name);
-    /* allocate buffer */
-    while (ftruncate(fd, size) < 0) {
-        if (errno != EINTR) {
-            close(fd);
-            return -1;
-        }
-    }
-    return fd;
-}
-
-static void update_shm(Client *client, uint32_t width, uint32_t height) {
-    uint64_t size = (uint64_t) width * (uint64_t) height * 4;
-    if (size > INT_MAX) {
-        log_warn("taskbar dimensions too large");
-        return;
-    }
-    int new_size = size;
-    int old_size = client->width * client->height * 4;
-    if (old_size == new_size) return;
-
-    int fd = alloc_shm(client, new_size);
-    if (fd < 0) {
-        log_warn("failed to open shm file");
-        return;
-    }
-
-    unsigned char *buffer =
-        mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (buffer == MAP_FAILED) {
-        log_warn("failed to mmap new shm");
-        close(fd);
-        return;
-    }
-
-    if (client->buffer) {
-        munmap(client->buffer, old_size);
-    }
-    client->buffer = buffer;
-
-    if (client->buffer_fd >= 0) {
-        close(client->buffer_fd);
-    }
-    client->buffer_fd = fd;
-
-    client->width = width;
-    client->height = height;
-}
-
-void client_rerender(Client *client);
-
-static void rerender(Client *client) {
-    client_rerender(client);
-}
-
-void update_gui(Client *client);
-
-static void on_surface_configure(
-    void                         *data,
-    struct zwlr_layer_surface_v1 *surface,
-    uint32_t                      serial,
-    uint32_t                      width,
-    uint32_t                      height
-) {
-    Client *client = data;
-    zwlr_layer_surface_v1_ack_configure(surface, serial);
-
-    update_shm(client, width, height);
-    update_gui(client);
-}
-
-static void on_surface_closed(
-    void                         *data,
-    struct zwlr_layer_surface_v1 *surface
-) {
-    Client *client = data;
-    if (surface == client->layer_surface) {
-        log_info("surface was closed, shutting down");
-        client->should_close = true;
-    }
-}
-
-static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
-    .configure = on_surface_configure,
-    .closed    = on_surface_closed,
-};
-
 ToplevelList *toplevel_list_init(Client *client);
 
 PointerManager *pointer_manager_init(Client *client);
+
+void add_surface_listener(Client *client);
 
 Client *client_init(const char *display, const Config *config) {
     /* allocate client, set all values to null */
@@ -263,8 +157,7 @@ Client *client_init(const char *display, const Config *config) {
         log_error("failed to create toplevel list");
     }
 
-    zwlr_layer_surface_v1_add_listener(
-        self->layer_surface, &layer_surface_listener, self);
+    add_surface_listener(self);
 
     /* anchor to all but bottom */
     zwlr_layer_surface_v1_set_anchor(self->layer_surface,
