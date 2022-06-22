@@ -8,6 +8,7 @@ const IconManager = @import("IconManager.zig");
 const PointerManager = @import("PointerManager.zig");
 const std = @import("std");
 const Toplevel = @import("Toplevel.zig");
+const util = @import("util.zig");
 
 const Client = @This();
 /// The config settings
@@ -102,40 +103,21 @@ const InterfaceList = struct {
     }
 };
 
-fn onRegistryGlobal(
-    data: ?*anyopaque,
-    registry: ?*c.wl_registry,
-    name: u32,
-    interface: ?[*:0]const u8,
-    version: u32
-) callconv(.C) void {
-    const interface_name = std.mem.span(interface.?);
-    for (@ptrCast(*InterfaceList, @alignCast(@alignOf(InterfaceList), data.?)).specs) |*spec| {
-        if (std.mem.eql(u8, interface_name, std.mem.span(spec.interface.name))) {
-            if (version >= spec.version) {
-                spec.value = c.wl_registry_bind(registry, name, spec.interface, spec.version);
-            } else {
-                std.log.err("interface {s} is available, but too old", .{interface_name});
+const registry_listener = util.createListener(c.wl_registry_listener, struct {
+    pub fn global(specs: *InterfaceList, registry: ?*c.wl_registry, name: u32, interface: ?[*:0]const u8, version: u32) void {
+        const interface_name = std.mem.span(interface.?);
+        for (specs.specs) |*spec| {
+            if (std.mem.eql(u8, interface_name, std.mem.span(spec.interface.name))) {
+                if (version >= spec.version) {
+                    spec.value = c.wl_registry_bind(registry, name, spec.interface, spec.version);
+                } else {
+                    std.log.err("interface {s} is available, but too old", .{interface_name});
+                }
+                return;
             }
-            return;
         }
     }
-}
-
-fn onRegistryGlobalRemove(
-    data: ?*anyopaque,
-    registry: ?*c.wl_registry,
-    name: u32,
-) callconv(.C) void {
-    _ = data;
-    _ = registry;
-    _ = name;
-}
-
-const registry_listener = c.wl_registry_listener{
-    .global = onRegistryGlobal,
-    .global_remove = onRegistryGlobalRemove,
-};
+});
 
 fn initInterfaces(display: *c.wl_display) !InterfaceList {
     var specs = InterfaceList.init();
@@ -210,33 +192,22 @@ fn updateShm(self: *Client, width: u32, height: u32) !void {
     self.height = height;
 }
 
-fn onConfigure(
-    data: ?*anyopaque,
-    surface: ?*c.zwlr_layer_surface_v1,
-    serial: u32,
-    width: u32,
-    height: u32,
-) callconv(.C) void {
-    const client = @ptrCast(*Client, @alignCast(@alignOf(Client), data.?));
-    c.zwlr_layer_surface_v1_ack_configure(surface, serial);
-    client.updateShm(width, height) catch |err| {
-        std.log.err("failed to update shm: {}", .{err});
-    };
-    client.updateGui();
-}
-
-fn onClosed(data: ?*anyopaque, surface: ?*c.zwlr_layer_surface_v1) callconv(.C) void {
-    const client = @ptrCast(*Client, @alignCast(@alignOf(Client), data.?));
-    if (surface == client.layer_surface) {
-        std.log.info("surface was closed, shutting down", .{});
-        client.should_close = true;
+const surface_listener = util.createListener(c.zwlr_layer_surface_v1_listener, struct {
+    pub fn configure(client: *Client, surface: ?*c.zwlr_layer_surface_v1, serial: u32, width: u32, height: u32) void {
+        c.zwlr_layer_surface_v1_ack_configure(surface, serial);
+        client.updateShm(width, height) catch |err| {
+            std.log.err("failed to update shm: {}", .{err});
+        };
+        client.updateGui();
     }
-}
 
-const surface_listener = c.zwlr_layer_surface_v1_listener{
-    .configure = onConfigure,
-    .closed = onClosed,
-};
+    pub fn closed(client: *Client, surface: ?*c.zwlr_layer_surface_v1) void {
+        if (surface == client.layer_surface) {
+            std.log.info("surface was closed, shutting down", .{});
+            client.should_close = true;
+        }
+    }
+});
 
 pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     const display = c.wl_display_connect(display_name) orelse
@@ -424,24 +395,18 @@ pub fn release(self: *Client) void {
     self.pointer_manager.down = false;
 }
 
-fn onBufferRelease(
-    data:   ?*anyopaque,
-    buffer: ?*c.wl_buffer,
-) callconv(.C) void {
-    const client = @ptrCast(*Client, @alignCast(@alignOf(Client), data.?));
-    if (buffer == client.pool_buffer) {
-        c.wl_buffer_destroy(buffer);
-        client.pool_buffer = client.refreshPoolBuffer() catch |err| {
-            std.log.err("failed to refresh pool buffer: {}", .{err});
-            client.pool_buffer = null;
-            return;
-        };
+const buffer_listener = util.createListener(c.wl_buffer_listener, struct {
+    pub fn release(client: *Client, buffer: ?*c.wl_buffer) void {
+        if (buffer == client.pool_buffer) {
+            c.wl_buffer_destroy(buffer);
+            client.pool_buffer = client.refreshPoolBuffer() catch |err| {
+                std.log.err("failed to refresh pool buffer: {}", .{err});
+                client.pool_buffer = null;
+                return;
+            };
+        }
     }
-}
-
-const buffer_listener = c.wl_buffer_listener{
-    .release = onBufferRelease,
-};
+});
 
 fn refreshPoolBuffer(self: *Client) !*c.wl_buffer {
     const size = self.width * self.height * 4;
