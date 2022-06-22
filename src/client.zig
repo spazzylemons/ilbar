@@ -7,8 +7,8 @@ const std = @import("std");
 const Toplevel = @import("Toplevel.zig");
 
 extern fn strerror(errnum: c_int) [*:0]u8;
-extern fn free_all_toplevels(self: *c.Client) void;
 extern fn icons_deinit(icons: *c.IconManager) void;
+extern fn toplevel_list_init(client: *c.Client) ?*c.ToplevelList;
 extern fn toplevel_list_deinit(list: *c.ToplevelList) void;
 
 fn refreshPoolBuffer(self: *c.Client) !*c.wl_buffer {
@@ -184,7 +184,7 @@ export fn client_deinit(self: *c.Client) void {
 
     if (self.display) |x| c.wl_display_disconnect(x);
 
-    std.c.free(self);
+    allocator.destroy(self);
 }
 
 export fn client_run(self: *c.Client) void {
@@ -310,6 +310,177 @@ const surface_listener = c.zwlr_layer_surface_v1_listener{
     .closed = onClosed,
 };
 
-export fn add_surface_listener(self: *c.Client) void {
+/// Specification for loading an interface from the registry.
+const InterfaceSpec = struct {
+    /// The interface to bind to.
+    interface: *const c.wl_interface,
+    /// The minimum supported version.
+    version: u32,
+    /// The location to store the interface.
+    offset: usize,
+
+    pub inline fn get(self: InterfaceSpec, client: *c.Client) *?*anyopaque {
+        return @intToPtr(*?*anyopaque, @ptrToInt(client) + self.offset);
+    }
+};
+
+var initialized_specs = false;
+var specs: [5]InterfaceSpec = undefined;
+
+fn initSpecs() void {
+    if (initialized_specs) return;
+    specs = .{
+        .{
+            .interface = &c.wl_shm_interface,
+            .version = 1,
+            .offset = @offsetOf(c.Client, "shm"),
+        },
+        .{
+            .interface = &c.wl_compositor_interface,
+            .version = 4,
+            .offset = @offsetOf(c.Client, "compositor"),
+        },
+        .{
+            .interface = &c.zwlr_layer_shell_v1_interface,
+            .version = 4,
+            .offset = @offsetOf(c.Client, "layer_shell"),
+        },
+        .{
+            .interface = &c.wl_seat_interface,
+            .version = 7,
+            .offset = @offsetOf(c.Client, "seat"),
+        },
+        .{
+            .interface = &c.zwlr_foreign_toplevel_manager_v1_interface,
+            .version = 3,
+            .offset = @offsetOf(c.Client, "toplevel_manager"),
+        },
+    };
+    initialized_specs = true;
+}
+
+fn onRegistryGlobal(
+    data: ?*anyopaque,
+    registry: ?*c.wl_registry,
+    name: u32,
+    interface: ?[*:0]const u8,
+    version: u32
+) callconv(.C) void {
+    const interface_name = std.mem.span(interface.?);
+    const client = @ptrCast(*c.Client, @alignCast(@alignOf(c.Client), data.?));
+    for (specs) |spec| {
+        if (std.mem.eql(u8, interface_name, std.mem.span(spec.interface.name))) {
+            if (version >= spec.version) {
+                spec.get(client).* = c.wl_registry_bind(registry, name, spec.interface, spec.version);
+            } else {
+                std.log.err("interface {s} is available, but too old", .{interface_name});
+            }
+            return;
+        }
+    }
+}
+
+fn onRegistryGlobalRemove(
+    data: ?*anyopaque,
+    registry: ?*c.wl_registry,
+    name: u32,
+) callconv(.C) void {
+    _ = data;
+    _ = registry;
+    _ = name;
+}
+
+const registry_listener = c.wl_registry_listener{
+    .global = onRegistryGlobal,
+    .global_remove = onRegistryGlobalRemove,
+};
+
+fn clientInit(display: ?[*:0]const u8, config: *c.Config) !*c.Client {
+    initSpecs();
+
+    const self = try allocator.create(c.Client);
+    errdefer client_deinit(self);
+    @memset(@ptrCast([*]u8, self), 0, @sizeOf(c.Client));
+    self.config = config;
+    self.buffer_fd = -1;
+
+    self.display = c.wl_display_connect(display) orelse {
+        std.log.err("failed to open the wayland display", .{});
+        return error.WaylandError;
+    };
+    const display_name = display orelse @as(?[*:0]const u8, std.c.getenv("WAYLAND_DISPLAY"));
+    std.log.info("connected to display {s}", .{display_name});
+
+    {
+        const registry = c.wl_display_get_registry(self.display) orelse {
+            std.log.err("failed to get the Wayland registry", .{});
+            return error.WaylandError;
+        };
+        defer c.wl_registry_destroy(registry);
+
+        _ = c.wl_registry_add_listener(registry, &registry_listener, self);
+        if (c.wl_display_roundtrip(self.display) < 0) {
+            std.log.err("failed to perform roundtrip", .{});
+            return error.WaylandError;
+        }
+
+        var bad_interfaces = false;
+        for (specs) |spec| {
+            if (spec.get(self).* == null) {
+                std.log.err("interface {s} is unavailable or not new enough", .{spec.interface.name});
+                bad_interfaces = true;
+            }
+        }
+        if (bad_interfaces) {
+            return error.WaylandError;
+        }
+    }
+
+    self.wl_surface = c.wl_compositor_create_surface(self.compositor) orelse {
+        std.log.err("failed to create Wayland surface", .{});
+        return error.WaylandError;
+    };
+
+    self.layer_surface = c.zwlr_layer_shell_v1_get_layer_surface(
+        self.layer_shell,
+        self.wl_surface,
+        null,
+        c.ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
+        "ilbar",
+    ) orelse {
+        std.log.err("failed to create layer surface", .{});
+        return error.WaylandError;
+    };
+
+    self.toplevel_list = toplevel_list_init(self) orelse {
+        std.log.err("failed to create toplevel list", .{});
+        return error.Oops;
+    };
+
     _ = c.zwlr_layer_surface_v1_add_listener(self.layer_surface, &surface_listener, self);
+
+    // anchor to all but top
+    c.zwlr_layer_surface_v1_set_anchor(self.layer_surface,
+        c.ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+        c.ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+        c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM,
+    );
+    c.zwlr_layer_surface_v1_set_size(self.layer_surface, 0, @intCast(u32, config.height));
+    c.zwlr_layer_surface_v1_set_exclusive_zone(self.layer_surface, @intCast(i32, config.height));
+
+    c.wl_surface_commit(self.wl_surface);
+
+    self.icons = c.icons_init() orelse {
+        std.log.err("failed to create icon manager", .{});
+        return error.Oops;
+    };
+
+    const pm = try PointerManager.init(self);
+    self.pointer_manager = @ptrCast(*c.PointerManager, pm);
+
+    return self;
+}
+
+export fn client_init(display: ?[*:0]const u8, config: *c.Config) ?*c.Client {
+    return clientInit(display, config) catch null;
 }
