@@ -2,17 +2,16 @@
 
 const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
+const Config = @import("Config.zig");
 const Element = @import("Element.zig");
 const IconManager = @import("IconManager.zig");
 const PointerManager = @import("PointerManager.zig");
 const std = @import("std");
 const Toplevel = @import("Toplevel.zig");
 
-extern fn strerror(errnum: c_int) [*:0]u8;
-
 const Client = @This();
 /// The config settings
-config: *c.Config,
+config: *const Config,
 /// Global display object
 display: *c.wl_display,
 /// Global shared memory object
@@ -45,6 +44,8 @@ toplevel_list: Toplevel.List = .{},
 pointer_manager: PointerManager = .{},
 /// The GUI tree.
 gui: ?*Element = null,
+/// The calculated height of the font from the config.
+font_height: f64,
 /// The icon manager.
 icons: IconManager,
 
@@ -237,7 +238,7 @@ const surface_listener = c.zwlr_layer_surface_v1_listener{
     .closed = onClosed,
 };
 
-pub fn init(display_name: ?[*:0]const u8, config: *c.Config) !*Client {
+pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     const display = c.wl_display_connect(display_name) orelse
         return error.DisplayConnectFailed;
     errdefer c.wl_display_disconnect(display);
@@ -293,6 +294,7 @@ pub fn init(display_name: ?[*:0]const u8, config: *c.Config) !*Client {
         .seat = seat,
         .wl_surface = wl_surface,
         .layer_surface = layer_surface,
+        .font_height = config.fontHeight(),
         .icons = icons,
     };
 
@@ -324,11 +326,6 @@ pub fn run(self: *Client) void {
     while (!self.should_close and c.wl_display_dispatch(self.display) >= 0) {
         // nothing to do
     }
-
-    const err = c.wl_display_get_error(self.display);
-    if (err != 0) {
-        std.log.err("disconnected: {s}", .{std.mem.span(strerror(err))});
-    }
 }
 
 fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_int) !void {
@@ -359,9 +356,9 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_
     }
     const text = try button.initChild(&Element.text_class);
     text.x = text_x;
-    text.y = @floatToInt(c_int, (@intToFloat(f64, button.height) - self.config.font_height) / 2);
+    text.y = @floatToInt(c_int, (@intToFloat(f64, button.height) - self.font_height) / 2);
     text.width = text_width;
-    text.height = @floatToInt(c_int, self.config.font_height);
+    text.height = @floatToInt(c_int, self.font_height);
     if (toplevel.title) |title| {
         text.data = .{ .text = try allocator.dupeZ(u8, title) };
     } else {

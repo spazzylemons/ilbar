@@ -264,7 +264,7 @@ pub fn render(self: *Element, client: *Client) void {
 
     c.cairo_select_font_face(
         cr,
-        client.config.font,
+        client.config.fontName(),
         c.CAIRO_FONT_SLANT_NORMAL,
         c.CAIRO_FONT_WEIGHT_NORMAL,
     );

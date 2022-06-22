@@ -1,5 +1,4 @@
 pub usingnamespace @cImport({
-    @cInclude("config.h");
     @cInclude("gio/gdesktopappinfo.h");
     @cInclude("gtk-3.0/gtk/gtk.h");
     @cInclude("linux/input-event-codes.h");

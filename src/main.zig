@@ -1,12 +1,13 @@
 const c = @import("c.zig");
 const Client = @import("Client.zig");
+const Config = @import("Config.zig");
 const IconManager = @import("IconManager.zig");
 const std = @import("std");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
 
-fn openConfigFile(path: ?[*:0]u8) !*std.c.FILE {
+fn openConfigFile(path: ?[*:0]u8) !std.fs.File {
     var generated: ?[:0]u8 = null;
     const config_path = path orelse blk: {
         if (std.c.getenv("XDG_CONFIG_HOME")) |config_home| {
@@ -18,22 +19,14 @@ fn openConfigFile(path: ?[*:0]u8) !*std.c.FILE {
         break :blk generated.?.ptr;
     };
     defer if (generated) |g| allocator.free(g);
-    return std.c.fopen(config_path, "r") orelse return error.CannotOpenFile;
+    return try std.fs.cwd().openFile(std.mem.span(config_path), .{});
 }
 
-fn readConfigFile(path: ?[*:0]u8, config: *c.Config) !void {
+fn readConfigFile(path: ?[*:0]u8) !Config {
     const file = try openConfigFile(path);
-    defer _ = std.c.fclose(file);
+    defer file.close();
 
-    var buf: [64]u8 = undefined;
-    var fr: c.CJFileReader = undefined;
-    c.cj_init_file_reader(&fr, @ptrCast(*c.FILE, @alignCast(@alignOf(c.FILE), file)), &buf, buf.len);
-    var json: c.CJValue = undefined;
-    if (c.cj_parse(null, &fr.reader, &json) != c.CJ_SUCCESS) {
-        return error.ParseError;
-    }
-    defer c.cj_free(null, &json);
-    c.config_parse(config, &json);
+    return try Config.parse(file);
 }
 
 pub fn main() u8 {
@@ -104,14 +97,11 @@ pub fn main() u8 {
         }
     }
 
-    var config: c.Config = undefined;
-    c.config_defaults(&config);
-    defer c.config_deinit(&config);
-    readConfigFile(config_path, &config) catch |err| {
-        // log error, but proceed with default config
+    const config = readConfigFile(config_path) catch |err| blk: {
         std.log.err("error reading config file: {}", .{err});
+        break :blk Config{};
     };
-    c.config_process(&config);
+    defer config.deinit();
 
     const client = Client.init(display, &config) catch |err| {
         std.log.err("failed to create client: {}", .{err});

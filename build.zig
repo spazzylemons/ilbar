@@ -107,16 +107,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe.setBuildMode(mode);
 
     exe.linkLibC();
-    exe.addCSourceFiles(&.{
-        "src/config.c",
-        "src/util.c",
-
-        "cj/cj.c",
-        "lib/log.c",
-    }, &.{});
-    exe.addIncludePath("src");
-    exe.addIncludePath("cj");
-    exe.addIncludePath("lib");
     exe.addIncludePath("build");
     exe.defineCMacro("_POSIX_C_SOURCE", "200809L");
     exe.defineCMacro("LOG_USE_COLOR", null);
