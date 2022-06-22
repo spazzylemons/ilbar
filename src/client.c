@@ -11,7 +11,6 @@
 #include <wayland-client.h>
 #include <wlr-foreign-toplevel-management-unstable-v1-protocol.h>
 #include <wlr-layer-shell-unstable-v1-protocol.h>
-#include <relative-pointer-unstable-v1-protocol.h>
 
 #include "client.h"
 #include "util.h"
@@ -37,8 +36,6 @@ const InterfaceSpec specs[] = {
         offsetof(Client, seat) },
     { &zwlr_foreign_toplevel_manager_v1_interface, 3,
         offsetof(Client, toplevel_manager) },
-    { &zwp_relative_pointer_manager_v1_interface,  1,
-        offsetof(Client, pointer_manager) },
     { NULL },
 };
 
@@ -189,250 +186,9 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
     .closed    = on_surface_closed,
 };
 
-static void on_pointer_enter(
-    void              *data,
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(serial),
-    struct wl_surface *UNUSED(surface),
-    wl_fixed_t         surface_x,
-    wl_fixed_t         surface_y
-) {
-    Client *client = data;
-    client->mouse_x = surface_x;
-    client->mouse_y = surface_y;
-}
-
-static void on_pointer_leave(
-    void              *UNUSED(data),
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(serial),
-    struct wl_surface *UNUSED(surface)
-) {}
-
-static void on_pointer_motion(
-    void              *UNUSED(data),
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(time),
-    wl_fixed_t         UNUSED(surface_x),
-    wl_fixed_t         UNUSED(surface_y)
-) {}
-
-static void on_pointer_button(
-    void              *data,
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(serial),
-    uint32_t           UNUSED(time),
-    uint32_t           button,
-    uint32_t           state
-) {
-    Client *client = data;
-    if (button == BTN_LEFT) {
-        if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
-            client_press(client);
-        } else {
-            client_release(client);
-        }
-    }
-}
-
-static void on_pointer_axis(
-    void              *UNUSED(data),
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(time),
-    uint32_t           UNUSED(axis),
-    wl_fixed_t         UNUSED(value)
-) {}
-
-static void on_pointer_frame(
-    void              *UNUSED(data),
-    struct wl_pointer *UNUSED(pointer)
-) {}
-
-static void on_pointer_axis_source(
-    void              *UNUSED(data),
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(axis_source)
-) {}
-
-static void on_pointer_axis_stop(
-    void              *UNUSED(data),
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(time),
-    uint32_t           UNUSED(axis)
-) {}
-
-static void on_pointer_axis_discrete(
-    void              *UNUSED(data),
-    struct wl_pointer *UNUSED(pointer),
-    uint32_t           UNUSED(axis),
-    int32_t            UNUSED(discrete)
-) {}
-
-static const struct wl_pointer_listener pointer_listener = {
-    .enter         = on_pointer_enter,
-    .leave         = on_pointer_leave,
-    .motion        = on_pointer_motion,
-    .button        = on_pointer_button,
-    .axis          = on_pointer_axis,
-    .frame         = on_pointer_frame,
-    .axis_source   = on_pointer_axis_source,
-    .axis_stop     = on_pointer_axis_stop,
-    .axis_discrete = on_pointer_axis_discrete,
-};
-
-static void on_relative_motion(
-    void                           *data,
-    struct zwp_relative_pointer_v1 *UNUSED(relative),
-    uint32_t                        UNUSED(utime_hi),
-    uint32_t                        UNUSED(utime_lo),
-    wl_fixed_t                      dx,
-    wl_fixed_t                      dy,
-    wl_fixed_t                      UNUSED(dx_unaccel),
-    wl_fixed_t                      UNUSED(dy_unaccel)
-) {
-    Client *client = data;
-    client->mouse_x += dx;
-    client->mouse_y += dy;
-    client_motion(client);
-}
-
-static const struct zwp_relative_pointer_v1_listener relative_listener = {
-    .relative_motion = on_relative_motion,
-};
-
-static void on_touch_down(
-    void              *data,
-    struct wl_touch   *UNUSED(touch),
-    uint32_t           UNUSED(serial),
-    uint32_t           UNUSED(time),
-    struct wl_surface *UNUSED(surface),
-    int32_t            UNUSED(id),
-    wl_fixed_t         x,
-    wl_fixed_t         y
-) {
-    Client *client = data;
-    client->mouse_x = x;
-    client->mouse_y = y;
-    client_press(client);
-}
-
-static void on_touch_up(
-    void              *data,
-    struct wl_touch   *UNUSED(touch),
-    uint32_t           UNUSED(serial),
-    uint32_t           UNUSED(time),
-    int32_t            UNUSED(id)
-) {
-    Client *client = data;
-    client_release(client);
-}
-
-static void on_touch_motion(
-    void              *data,
-    struct wl_touch   *UNUSED(touch),
-    uint32_t           UNUSED(time),
-    int32_t            UNUSED(id),
-    wl_fixed_t         x,
-    wl_fixed_t         y
-) {
-    Client *client = data;
-    client->mouse_x = x;
-    client->mouse_y = y;
-    client_motion(client);
-}
-
-static void on_touch_frame(
-    void              *UNUSED(data),
-    struct wl_touch   *UNUSED(touch)
-) {}
-
-static void on_touch_cancel(
-    void              *UNUSED(data),
-    struct wl_touch   *UNUSED(touch)
-) {}
-
-static void on_touch_shape(
-    void              *UNUSED(data),
-    struct wl_touch   *UNUSED(touch),
-    int32_t            UNUSED(id),
-    wl_fixed_t         UNUSED(major),
-    wl_fixed_t         UNUSED(minor)
-) {}
-
-static void on_touch_orientation(
-    void              *UNUSED(data),
-    struct wl_touch   *UNUSED(touch),
-    int32_t            UNUSED(id),
-    wl_fixed_t         UNUSED(orientation)
-) {}
-
-static const struct wl_touch_listener touch_listener = {
-    .down        = on_touch_down,
-    .up          = on_touch_up,
-    .motion      = on_touch_motion,
-    .frame       = on_touch_frame,
-    .cancel      = on_touch_cancel,
-    .shape       = on_touch_shape,
-    .orientation = on_touch_orientation,
-};
-
-static void on_seat_capabilities(
-    void           *data,
-    struct wl_seat *seat,
-    uint32_t        capabilities
-) {
-    Client *client = data;
-
-    if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
-        struct wl_pointer *pointer = wl_seat_get_pointer(seat);
-        if (pointer) {
-            struct zwp_relative_pointer_v1 *relative_pointer =
-                zwp_relative_pointer_manager_v1_get_relative_pointer(
-                    client->pointer_manager,
-                    pointer);
-            if (relative_pointer) {
-                if (client->relative_pointer)
-                    zwp_relative_pointer_v1_destroy(client->relative_pointer);
-                client->relative_pointer = relative_pointer;
-                if (client->pointer) wl_pointer_destroy(client->pointer);
-                client->pointer = pointer;
-                zwp_relative_pointer_v1_add_listener(
-                    client->relative_pointer, &relative_listener, client);
-                wl_pointer_add_listener(
-                    client->pointer, &pointer_listener, client);
-            } else {
-                wl_pointer_destroy(pointer);
-                log_warn("failed to obtain the relative pointer");
-            }
-        } else {
-            log_warn("failed to obtain the pointer");
-        }
-    }
-
-    if (capabilities & WL_SEAT_CAPABILITY_TOUCH) {
-        struct wl_touch *touch = wl_seat_get_touch(seat);
-        if (touch) {
-            if (client->touch) wl_touch_destroy(client->touch);
-            client->touch = touch;
-            wl_touch_add_listener(client->touch, &touch_listener, client);
-        } else {
-            log_warn("failed to obtain the touch");
-        }
-    }
-}
-
-static void on_seat_name(
-    void           *UNUSED(data),
-    struct wl_seat *UNUSED(seat),
-    const char     *UNUSED(name)
-) {}
-
-static const struct wl_seat_listener seat_listener = {
-    .capabilities = on_seat_capabilities,
-    .name         = on_seat_name,
-};
-
 ToplevelList *toplevel_list_init(Client *client);
+
+PointerManager *pointer_manager_init(Client *client);
 
 Client *client_init(const char *display, const Config *config) {
     /* allocate client, set all values to null */
@@ -521,9 +277,9 @@ Client *client_init(const char *display, const Config *config) {
 
     wl_surface_commit(self->wl_surface);
 
-    wl_seat_add_listener(self->seat, &seat_listener, self);
-
     self->icons = icons_init();
+
+    self->pointer_manager = pointer_manager_init(self);
 
     return self;
 }

@@ -11,6 +11,7 @@
 #include "icons.h"
 
 typedef struct ToplevelList ToplevelList;
+typedef struct PointerManager PointerManager;
 
 /** The interface to Wayland. */
 typedef struct Client {
@@ -28,16 +29,12 @@ typedef struct Client {
     struct wl_seat *seat;
     /** Global importer object */
     struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager;
-    /** Global relative pointer object */
-    struct zwp_relative_pointer_manager_v1 *pointer_manager;
     /** Current Wayland surface object */
     struct wl_surface *wl_surface;
     /** Current layer surface object */
     struct zwlr_layer_surface_v1 *layer_surface;
     /** Current pointer object */
     struct wl_pointer *pointer;
-    /** Current relative pointer object */
-    struct zwp_relative_pointer_v1 *relative_pointer;
     /** Current touch object */
     struct wl_touch *touch;
     /** The current pixel buffer, or NULL if not currently allocated. */
@@ -50,12 +47,10 @@ typedef struct Client {
     bool should_close;
     /** The current dimensions of the surface. */
     uint32_t width, height;
-    /** The last seen position of the pointer or touch. */
-    wl_fixed_t mouse_x, mouse_y;
-    /** If true, the mouse is considered pressed. */
-    bool mouse_down;
     /** A list of toplevel info. */
     ToplevelList *toplevel_list;
+    /** Pointer info. */
+    PointerManager *pointer_manager;
     /** The GUI tree. */
     Element *gui;
     /** The icon manager. */

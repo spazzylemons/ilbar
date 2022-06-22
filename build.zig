@@ -67,25 +67,33 @@ const WaylandScannerStep = struct {
         );
         defer self.b.allocator.free(wayland_scanner_full);
         const wayland_scanner = wayland_scanner_full[0 .. wayland_scanner_full.len - 1];
-        self.b.allocator.free(runCommand(
-            self.b,
-            &.{
-                wayland_scanner,
-                "private-code",
-                xml,
-                c_file,
-            },
-        ));
+        if (std.fs.cwd().statFile(c_file)) |_| {
+            // file exists, nothing to do
+        } else |_| {
+            self.b.allocator.free(runCommand(
+                self.b,
+                &.{
+                    wayland_scanner,
+                    "private-code",
+                    xml,
+                    c_file,
+                },
+            ));
+        }
         self.dst_c_file.path = c_file;
-        self.b.allocator.free(runCommand(
-            self.b,
-            &.{
-                wayland_scanner,
-                "client-header",
-                xml,
-                h_file,
-            },
-        ));
+        if (std.fs.cwd().statFile(h_file)) |_| {
+            // file exists, nothing to do
+        } else |_| {
+            self.b.allocator.free(runCommand(
+                self.b,
+                &.{
+                    wayland_scanner,
+                    "client-header",
+                    xml,
+                    h_file,
+                },
+            ));
+        }
         self.dst_h_file.path = h_file;
     }
 };
@@ -133,7 +141,6 @@ pub fn build(b: *std.build.Builder) !void {
 
     const protocol_xml = [_][]const u8{
         b.pathJoin(&.{pkgdatadir, "stable/xdg-shell/xdg-shell"}),
-        b.pathJoin(&.{pkgdatadir, "unstable/relative-pointer/relative-pointer-unstable-v1"}),
         "lib/wlr-foreign-toplevel-management-unstable-v1",
         "lib/wlr-layer-shell-unstable-v1",
     };

@@ -2,6 +2,7 @@ const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
 const Element = @import("Element.zig");
 const IconManager = @import("IconManager.zig");
+const PointerManager = @import("PointerManager.zig");
 const std = @import("std");
 const Toplevel = @import("Toplevel.zig");
 
@@ -52,6 +53,14 @@ const buffer_listener = c.wl_buffer_listener{
 
 fn getGui(self: *c.Client) ?*Element {
     return @ptrCast(*Element, @alignCast(@alignOf(Element), self.gui orelse return null));
+}
+
+fn getPtrManager(self: *c.Client) ?*PointerManager {
+    return @ptrCast(*PointerManager, @alignCast(@alignOf(PointerManager), self.pointer_manager orelse return null));
+}
+
+export fn pointer_manager_init(self: *c.Client) ?*PointerManager {
+    return PointerManager.init(self) catch return null;
 }
 
 export fn client_rerender(self: *c.Client) void {
@@ -156,13 +165,15 @@ export fn client_deinit(self: *c.Client) void {
     if (self.buffer) |x| _ = std.c.munmap(@alignCast(4096, x), @intCast(usize, self.width * self.height * 4));
     if (self.buffer_fd >= 0) _ = std.c.close(self.buffer_fd);
 
-    if (self.relative_pointer) |x|
-        c.zwp_relative_pointer_v1_destroy(x);
     if (self.pointer) |x| c.wl_pointer_destroy(x);
     if (self.touch) |x| c.wl_touch_destroy(x);
 
     if (self.layer_surface) |x| c.zwlr_layer_surface_v1_destroy(x);
     if (self.wl_surface) |x| c.wl_surface_destroy(x);
+
+    if (getPtrManager(self)) |x| {
+        allocator.destroy(x);
+    }
 
     if (self.shm) |x| c.wl_shm_destroy(x);
     if (self.compositor) |x| c.wl_compositor_destroy(x);
@@ -170,8 +181,6 @@ export fn client_deinit(self: *c.Client) void {
     if (self.seat) |x| c.wl_seat_destroy(x);
     if (self.toplevel_manager) |x|
         c.zwlr_foreign_toplevel_manager_v1_destroy(x);
-    if (self.pointer_manager) |x|
-        c.zwp_relative_pointer_manager_v1_destroy(x);
 
     if (self.display) |x| c.wl_display_disconnect(x);
 
@@ -191,23 +200,23 @@ export fn client_run(self: *c.Client) void {
 
 export fn client_press(self: *c.Client) void {
     if (getGui(self)) |g| {
-        if (!self.mouse_down) {
+        if (!getPtrManager(self).?.down) {
             _ = g.press(
-                c.wl_fixed_to_int(self.mouse_x),
-                c.wl_fixed_to_int(self.mouse_y),
+                getPtrManager(self).?.x,
+                getPtrManager(self).?.y,
             );
             client_rerender(self);
         }
     }
-    self.mouse_down = true;
+    getPtrManager(self).?.down = true;
 }
 
 export fn client_motion(self: *c.Client) void {
     if (getGui(self)) |g| {
-        if (self.mouse_down) {
+        if (getPtrManager(self).?.down) {
             _ = g.motion(
-                c.wl_fixed_to_int(self.mouse_x),
-                c.wl_fixed_to_int(self.mouse_y),
+                getPtrManager(self).?.x,
+                getPtrManager(self).?.y,
             );
             client_rerender(self);
         }
@@ -216,10 +225,10 @@ export fn client_motion(self: *c.Client) void {
 
 export fn client_release(self: *c.Client) void {
     if (getGui(self)) |g| {
-        if (self.mouse_down) {
+        if (getPtrManager(self).?.down) {
             _ = g.release();
             client_rerender(self);
         }
     }
-    self.mouse_down = false;
+    getPtrManager(self).?.down = false;
 }
