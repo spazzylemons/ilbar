@@ -10,7 +10,5 @@ typedef struct IconManager IconManager;
 IconManager *icons_init(void);
 /** Destroy an icon manager and related resources. */
 void icons_deinit(IconManager *icons);
-/** Get an icon as a surface. */
-cairo_surface_t *icons_get(IconManager *icons, const char *name);
 
 #endif

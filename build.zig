@@ -110,7 +110,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addCSourceFiles(&.{
         "src/client.c",
         "src/config.c",
-        "src/main.c",
         "src/util.c",
 
         "cj/cj.c",
