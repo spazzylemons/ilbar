@@ -1,7 +1,6 @@
 const c = @import("c.zig");
 const Client = @import("Client.zig");
 const Config = @import("Config.zig");
-const IconManager = @import("IconManager.zig");
 const std = @import("std");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};

@@ -1,12 +1,5 @@
 const allocator = @import("main.zig").allocator;
-const c = @import("c.zig");
-const Config = @import("Config.zig");
-const Element = @import("Element.zig");
-const IconManager = @import("IconManager.zig");
-const PointerManager = @import("PointerManager.zig");
 const std = @import("std");
-const Toplevel = @import("Toplevel.zig");
-const util = @import("util.zig");
 
 const Buffer = @This();
 

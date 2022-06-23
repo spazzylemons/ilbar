@@ -1,4 +1,3 @@
-const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
 const Client = @import("Client.zig");
 const std = @import("std");
