@@ -4,11 +4,18 @@ const std = @import("std");
 
 const Config = @This();
 
+pub const Shortcut = struct {
+    text: [:0]const u8,
+    icon: ?[:0]const u8 = null,
+    command: [:0]const u8,
+};
+
 font: ?[:0]const u8 = null,
 font_size: u16 = 11,
 height: u16 = 28,
 margin: u16 = 3,
 width: u16 = 160,
+shortcuts: []Shortcut = &.{},
 
 pub fn fontName(self: Config) [:0]const u8 {
     return self.font orelse "FreeSans";
@@ -44,11 +51,31 @@ pub fn fontHeight(self: Config) f64 {
     // no complete dummy surface available - recording surface is closest
     const target = c.cairo_recording_surface_create(c.CAIRO_CONTENT_COLOR_ALPHA, null);
     defer c.cairo_surface_destroy(target);
+
     const cr = c.cairo_create(target);
     defer c.cairo_destroy(cr);
+
     c.cairo_select_font_face(cr, self.fontName(), c.CAIRO_FONT_SLANT_NORMAL, c.CAIRO_FONT_WEIGHT_NORMAL);
     c.cairo_set_font_size(cr, @intToFloat(f64, self.font_size));
+
     var fe: c.cairo_font_extents_t = undefined;
     c.cairo_font_extents(cr, &fe);
+
     return fe.height;
+}
+
+pub fn textWidth(self: Config, text: [*:0]const u8) f64 {
+    const target = c.cairo_recording_surface_create(c.CAIRO_CONTENT_COLOR_ALPHA, null);
+    defer c.cairo_surface_destroy(target);
+
+    const cr = c.cairo_create(target);
+    defer c.cairo_destroy(cr);
+
+    c.cairo_select_font_face(cr, self.fontName(), c.CAIRO_FONT_SLANT_NORMAL, c.CAIRO_FONT_WEIGHT_NORMAL);
+    c.cairo_set_font_size(cr, @intToFloat(f64, self.font_size));
+
+    var te: c.cairo_text_extents_t = undefined;
+    c.cairo_text_extents(cr, text, &te);
+
+    return te.width;
 }

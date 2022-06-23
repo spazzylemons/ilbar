@@ -1,0 +1,13 @@
+{
+    "shortcuts": [
+        {
+            "text": "Start",
+            "icon": "start-here",
+            "command": "bemenu-run"
+        },
+        {
+            "text": "Say Hello",
+            "command": "zenity --info --text 'Hello world!'"
+        }
+    ]
+}

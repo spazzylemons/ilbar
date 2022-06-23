@@ -260,7 +260,41 @@ pub fn run(self: *Client) void {
     }
 }
 
-fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_int) !void {
+fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *Element, x: i32) !*Element {
+    const button = try root.initChild(&Element.shortcut_button_class);
+    errdefer button.deinit();
+
+    const text_width = @floatToInt(i32, self.config.textWidth(shortcut.text.ptr));
+    var text_x = self.config.margin;
+
+    button.x = x;
+    button.y = 4;
+    button.width = text_width + (2 * self.config.margin) + 1;
+    button.height = self.config.height - 6;
+    button.data = .{ .command = shortcut.command.ptr };
+
+    if (shortcut.icon) |icon_name| {
+        const image = try self.icons.getFromIconName(icon_name);
+        errdefer c.cairo_surface_destroy(image);
+        const icon = try button.initChild(&Element.image_class);
+        icon.x = self.config.*.margin;
+        icon.y = @divTrunc(button.height - 16, 2);
+        icon.data = .{ .image = image };
+        button.width += 16 + self.config.margin;
+        text_x += 16 + self.config.margin;
+    }
+    const text = try button.initChild(&Element.text_class);
+    text.x = text_x;
+    text.y = @floatToInt(i32, (@intToFloat(f64, button.height) - self.font_height) / 2);
+    text.width = text_width;
+    text.height = @floatToInt(i32, self.font_height);
+    text.data = .{ .text = null };
+    text.data = .{ .text = try allocator.dupeZ(u8, shortcut.text) };
+
+    return button;
+}
+
+fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i32) !*Element {
     const button = try root.initChild(&Element.window_button_class);
     errdefer button.deinit();
 
@@ -276,7 +310,7 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_
     var text_x = self.config.margin;
     var text_width = self.config.width - (2 * self.config.margin);
     if (toplevel.app_id) |app_id| {
-        if (try self.icons.get(app_id)) |image| {
+        if (try self.icons.getFromAppId(app_id)) |image| {
             errdefer c.cairo_surface_destroy(image);
             const icon = try button.initChild(&Element.image_class);
             icon.x = self.config.*.margin;
@@ -291,23 +325,31 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_
     text.y = @floatToInt(i32, (@intToFloat(f64, button.height) - self.font_height) / 2);
     text.width = text_width;
     text.height = @floatToInt(i32, self.font_height);
+    text.data = .{ .text = null };
     if (toplevel.title) |title| {
         text.data = .{ .text = try allocator.dupeZ(u8, title) };
-    } else {
-        text.data = .{ .text = null };
     }
+    return button;
 }
 
 fn createGui(self: *Client) !*Element {
     const root = try Element.init();
     root.width = self.width;
     root.height = self.height;
-    var x = self.config.margin;
+    var x: i32 = self.config.margin;
+
+    for (self.config.shortcuts) |shortcut| {
+        if (self.createShortcutButton(&shortcut, root, x)) |button| {
+            x += button.width + self.config.margin;
+        } else |err| {
+            std.log.warn("failed to create a shortcut button: {}", .{err});
+        }
+    }
 
     var it = self.toplevel_list.list.first;
     while (it) |node| {
-        if (self.createTaskbarButton(&node.data, root, x)) |_| {
-            x += self.config.width + self.config.margin;
+        if (self.createTaskbarButton(&node.data, root, x)) |button| {
+            x += button.width + self.config.margin;
         } else |err| {
             std.log.warn("failed to create a taskbar button: {}", .{err});
         }

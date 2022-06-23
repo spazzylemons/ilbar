@@ -9,17 +9,24 @@ const IconManager = @This();
 
 const ICON_CACHE_SIZE = 29;
 
-const Cache = @import("cache.zig").Cache([]const u8, ?*c.cairo_surface_t, struct {
-    pub fn hash(key: []const u8) usize {
-        return @truncate(usize, std.hash.Wyhash.hash(1, key));
+const CacheKind = enum { app_id, icon_name };
+
+const CacheKey = struct {
+    string: []const u8,
+    kind: CacheKind,
+};
+
+const Cache = @import("cache.zig").Cache(CacheKey, ?*c.cairo_surface_t, struct {
+    pub fn hash(key: CacheKey) usize {
+        return @truncate(usize, std.hash.Wyhash.hash(1, key.string));
     }
 
-    pub fn equal(a: []const u8, b: []const u8) bool {
-        return std.mem.eql(u8, a, b);
+    pub fn equal(a: CacheKey, b: CacheKey) bool {
+        return a.kind == b.kind and std.mem.eql(u8, a.string, b.string);
     }
 
-    pub fn free(key: []const u8, value: ?*c.cairo_surface_t) void {
-        allocator.free(key);
+    pub fn free(key: CacheKey, value: ?*c.cairo_surface_t) void {
+        allocator.free(key.string);
         if (value) |v| {
             c.cairo_surface_destroy(v);
         }
@@ -135,28 +142,21 @@ fn getIconName(name: [:0]const u8) !?[:0]u8 {
     return null;
 }
 
-fn putCache(self: *IconManager, name: []const u8, value: ?*c.cairo_surface_t) void {
+fn putCache(
+    self: *IconManager,
+    name: []const u8,
+    kind: CacheKind,
+    value: ?*c.cairo_surface_t,
+) void {
     // if we can't cache, not an issue
-    const key = allocator.dupe(u8, name) catch return;
+    const data = allocator.dupe(u8, name) catch return;
+    const key = CacheKey{ .string = data, .kind = kind };
     self.cache.put(key, value);
     if (value) |v| _ = c.cairo_surface_reference(v);
 }
 
-/// Get an icon as a surface.
-pub fn get(self: *IconManager, name: [:0]const u8) !?*c.cairo_surface_t {
-    if (self.cache.get(name)) |cached| {
-        if (cached) |surface| {
-            _ = c.cairo_surface_reference(surface);
-        }
-        return cached;
-    }
-
-    const icon_name = (try getIconName(name)) orelse {
-        self.putCache(name, null);
-        return null;
-    };
-    defer allocator.free(icon_name);
-
+/// Get an icon as a surface directly from the icon name.
+pub fn getFromIconName(self: *IconManager, icon_name: [:0]const u8) !*c.cairo_surface_t {
     var err: ?*c.GError = null;
     const pixbuf = c.gtk_icon_theme_load_icon(self.theme, icon_name, 16, 0, &err) orelse
         return util.gtkError(err.?);
@@ -193,7 +193,27 @@ pub fn get(self: *IconManager, name: [:0]const u8) !?*c.cairo_surface_t {
             src += 4;
         }
         c.cairo_surface_mark_dirty(surface);
-        self.putCache(name, surface);
+        self.putCache(icon_name, .icon_name, surface);
         return surface;
     }
+}
+
+/// Get an icon as a surface.
+pub fn getFromAppId(self: *IconManager, app_id: [:0]const u8) !?*c.cairo_surface_t {
+    if (self.cache.get(.{ .string = app_id, .kind = .app_id })) |cached| {
+        if (cached) |surface| {
+            _ = c.cairo_surface_reference(surface);
+        }
+        return cached;
+    }
+
+    const icon_name = (try getIconName(app_id)) orelse {
+        self.putCache(app_id, .app_id, null);
+        return null;
+    };
+    defer allocator.free(icon_name);
+
+    const surface = try self.getFromIconName(icon_name);
+    self.putCache(app_id, .app_id, surface);
+    return surface;
 }

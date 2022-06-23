@@ -32,6 +32,37 @@ const root_class = makeClass(struct {
     }
 });
 
+fn renderButton(self: *Element, cr: *c.cairo_t) void {
+    const left: f64 = 0.5;
+    const right = left + @intToFloat(f64, self.width) - 1;
+    const top: f64 = 0.5;
+    const bottom = top + @intToFloat(f64, self.height) - 1;
+
+    if (self.pressed_hover) {
+        // inset button
+        c.cairo_translate(cr, @intToFloat(f64, self.width), @intToFloat(f64, self.height));
+        c.cairo_rotate(cr, std.math.pi);
+    }
+
+    c.cairo_set_source_rgb(cr, 1, 1, 1);
+    c.cairo_move_to(cr, left, bottom);
+    c.cairo_line_to(cr, left, top);
+    c.cairo_line_to(cr, right, top);
+    c.cairo_stroke(cr);
+
+    c.cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
+    c.cairo_move_to(cr, right - 1, top + 1);
+    c.cairo_line_to(cr, right - 1, bottom - 1);
+    c.cairo_line_to(cr, left + 1, bottom - 1);
+    c.cairo_stroke(cr);
+
+    c.cairo_set_source_rgb(cr, 0, 0, 0);
+    c.cairo_move_to(cr, right, top);
+    c.cairo_line_to(cr, right, bottom);
+    c.cairo_line_to(cr, left, bottom);
+    c.cairo_stroke(cr);
+}
+
 pub const window_button_class = makeClass(struct {
     pub fn release(self: *Element) void {
         c.zwlr_foreign_toplevel_handle_v1_activate(
@@ -40,36 +71,44 @@ pub const window_button_class = makeClass(struct {
         );
     }
 
-    pub fn render(self: *Element, cr: *c.cairo_t) void {
-        const left: f64 = 0.5;
-        const right = left + @intToFloat(f64, self.width) - 1;
-        const top: f64 = 0.5;
-        const bottom = top + @intToFloat(f64, self.height) - 1;
+    pub const render = renderButton;
+});
 
-        if (self.pressed_hover) {
-            // inset button
-            c.cairo_translate(cr, @intToFloat(f64, self.width), @intToFloat(f64, self.height));
-            c.cairo_rotate(cr, std.math.pi);
+fn setsid() std.os.pid_t {
+    return @bitCast(std.os.pid_t, @truncate(u32, std.os.linux.syscall0(.setsid)));
+}
+
+pub const shortcut_button_class = makeClass(struct {
+    pub fn release(self: *Element) void {
+        const child = std.os.fork() catch |err| {
+            std.log.warn("shortcut: fork failed: {}", .{err});
+            return;
+        };
+
+        if (child == 0) {
+            // make us a session leader so we don't terminate if the taskbar closes
+            if (setsid() < 0) {
+                std.log.warn("shortcut: setsid failed", .{});
+            }
+
+            const grandchild = std.os.fork() catch |err| {
+                std.log.warn("shortcut: fork failed: {}", .{err});
+                return;
+            };
+
+            if (grandchild == 0) {
+                const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", self.data.command, null };
+                const err = std.os.execveZ("/bin/sh", &argv, std.c.environ);
+                std.log.warn("shortcut: execv failed: {}", .{err});
+            }
+
+            std.os.exit(0);
         }
 
-        c.cairo_set_source_rgb(cr, 1, 1, 1);
-        c.cairo_move_to(cr, left, bottom);
-        c.cairo_line_to(cr, left, top);
-        c.cairo_line_to(cr, right, top);
-        c.cairo_stroke(cr);
-
-        c.cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
-        c.cairo_move_to(cr, right - 1, top + 1);
-        c.cairo_line_to(cr, right - 1, bottom - 1);
-        c.cairo_line_to(cr, left + 1, bottom - 1);
-        c.cairo_stroke(cr);
-
-        c.cairo_set_source_rgb(cr, 0, 0, 0);
-        c.cairo_move_to(cr, right, top);
-        c.cairo_line_to(cr, right, bottom);
-        c.cairo_line_to(cr, left, bottom);
-        c.cairo_stroke(cr);
+        _ = std.os.waitpid(child, 0);
     }
+
+    pub const render = renderButton;
 });
 
 pub const text_class = makeClass(struct {
@@ -131,6 +170,7 @@ data: union {
         seat: *c.wl_seat,
     },
     image: ?*c.cairo_surface_t,
+    command: [*:0]const u8,
 } = undefined,
 
 pressed: bool = false,
