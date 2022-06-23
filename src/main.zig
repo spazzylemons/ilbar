@@ -8,18 +8,20 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
 
 fn openConfigFile(path: ?[*:0]u8) !std.fs.File {
-    var generated: ?[:0]u8 = null;
-    const config_path = path orelse blk: {
-        if (std.c.getenv("XDG_CONFIG_HOME")) |config_home| {
-            generated = try std.fmt.allocPrintZ(allocator, "{s}/ilbar/config.json", .{config_home});
+    var generated: []u8 = &.{};
+    const config_path = std.mem.span(path) orelse blk: {
+        if (std.os.getenvZ("XDG_CONFIG_HOME")) |config_home| {
+            generated = try std.fmt.allocPrint(allocator, "{s}/ilbar/config.json", .{config_home});
+        } else if (std.os.getenvZ("HOME")) |home| {
+            generated = try std.fmt.allocPrint(allocator, "{s}/.config/ilbar/config.json", .{home});
         } else {
-            const home = std.c.getenv("HOME").?;
-            generated = try std.fmt.allocPrintZ(allocator, "{s}/.config/ilbar/config.json", .{home});
+            return error.CannotFindConfigDir;
         }
-        break :blk generated.?.ptr;
+        break :blk generated;
     };
-    defer if (generated) |g| allocator.free(g);
-    return try std.fs.cwd().openFile(std.mem.span(config_path), .{});
+    defer allocator.free(generated);
+    std.log.info("using config file {s}", .{config_path});
+    return try std.fs.cwd().openFile(config_path, .{});
 }
 
 fn readConfigFile(path: ?[*:0]u8) !Config {
@@ -43,7 +45,7 @@ pub fn main() u8 {
     var i: usize = 1;
     while (i < std.os.argv.len) : (i += 1) {
         const arg = std.os.argv[i];
-        if (arg[0] != '-' or arg[2] != 0) {
+        if (arg[0] != '-' or arg[1] == 0 or arg[2] != 0) {
             std.log.err("invalid argument: {s}", .{arg});
             return 1;
         }

@@ -9,8 +9,8 @@ const PointerManager = @This();
 pointer: ?*c.wl_pointer = null,
 touch: ?*c.wl_touch = null,
 
-x: c_int = 0,
-y: c_int = 0,
+x: i32 = 0,
+y: i32 = 0,
 down: bool = false,
 
 const pointer_listener = util.createListener(c.wl_pointer_listener, struct {

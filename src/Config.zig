@@ -5,10 +5,10 @@ const std = @import("std");
 const Config = @This();
 
 font: ?[:0]const u8 = null,
-font_size: c_int = 11,
-height: c_int = 28,
-margin: c_int = 3,
-width: c_int = 160,
+font_size: u16 = 11,
+height: u16 = 28,
+margin: u16 = 3,
+width: u16 = 160,
 
 pub fn fontName(self: Config) [:0]const u8 {
     return self.font orelse "FreeSans";
@@ -31,7 +31,9 @@ pub fn parse(file: std.fs.File) !Config {
     defer allocator.free(source);
 
     var tokens = std.json.TokenStream.init(source);
-    return try std.json.parse(Config, &tokens, .{ .allocator = allocator });
+    const result = try std.json.parse(Config, &tokens, .{ .allocator = allocator });
+    if (result.height < 6) return error.InvalidNumber;
+    return result;
 }
 
 pub fn deinit(self: Config) void {

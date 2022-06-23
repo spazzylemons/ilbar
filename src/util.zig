@@ -1,3 +1,7 @@
+const c = @import("c.zig");
+const std = @import("std");
+extern fn strerror(c_int) [*:0]const u8;
+
 fn stubFn(comptime T: type) T {
     const func = @typeInfo(T).Fn;
     return switch (func.args.len) {
@@ -27,11 +31,11 @@ fn stubFn(comptime T: type) T {
             fn stub(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
             ) callconv(.C) void {
                 _ = a;
                 _ = b;
-                _ = c;
+                _ = z;
             }
         },
 
@@ -39,12 +43,12 @@ fn stubFn(comptime T: type) T {
             fn stub(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
             ) callconv(.C) void {
                 _ = a;
                 _ = b;
-                _ = c;
+                _ = z;
                 _ = d;
             }
         },
@@ -53,13 +57,13 @@ fn stubFn(comptime T: type) T {
             fn stub(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
             ) callconv(.C) void {
                 _ = a;
                 _ = b;
-                _ = c;
+                _ = z;
                 _ = d;
                 _ = e;
             }
@@ -69,14 +73,14 @@ fn stubFn(comptime T: type) T {
             fn stub(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
                 f: func.args[5].arg_type.?,
             ) callconv(.C) void {
                 _ = a;
                 _ = b;
-                _ = c;
+                _ = z;
                 _ = d;
                 _ = e;
                 _ = f;
@@ -87,7 +91,7 @@ fn stubFn(comptime T: type) T {
             fn stub(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
                 f: func.args[5].arg_type.?,
@@ -95,7 +99,7 @@ fn stubFn(comptime T: type) T {
             ) callconv(.C) void {
                 _ = a;
                 _ = b;
-                _ = c;
+                _ = z;
                 _ = d;
                 _ = e;
                 _ = f;
@@ -107,7 +111,7 @@ fn stubFn(comptime T: type) T {
             fn stub(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
                 f: func.args[5].arg_type.?,
@@ -116,7 +120,7 @@ fn stubFn(comptime T: type) T {
             ) callconv(.C) void {
                 _ = a;
                 _ = b;
-                _ = c;
+                _ = z;
                 _ = d;
                 _ = e;
                 _ = f;
@@ -158,9 +162,9 @@ fn wrapFn(comptime T: type, comptime listener: anytype) T {
             fn wrap(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
             ) callconv(.C) void {
-                listener(Tools.castPtr(a), b, c);
+                listener(Tools.castPtr(a), b, z);
             }
         },
 
@@ -168,10 +172,10 @@ fn wrapFn(comptime T: type, comptime listener: anytype) T {
             fn wrap(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
             ) callconv(.C) void {
-                listener(Tools.castPtr(a), b, c, d);
+                listener(Tools.castPtr(a), b, z, d);
             }
         },
 
@@ -179,11 +183,11 @@ fn wrapFn(comptime T: type, comptime listener: anytype) T {
             fn wrap(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
             ) callconv(.C) void {
-                listener(Tools.castPtr(a), b, c, d, e);
+                listener(Tools.castPtr(a), b, z, d, e);
             }
         },
 
@@ -191,12 +195,12 @@ fn wrapFn(comptime T: type, comptime listener: anytype) T {
             fn wrap(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
                 f: func.args[5].arg_type.?,
             ) callconv(.C) void {
-                listener(Tools.castPtr(a), b, c, d, e, f);
+                listener(Tools.castPtr(a), b, z, d, e, f);
             }
         },
 
@@ -204,13 +208,13 @@ fn wrapFn(comptime T: type, comptime listener: anytype) T {
             fn wrap(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
                 f: func.args[5].arg_type.?,
                 g: func.args[6].arg_type.?,
             ) callconv(.C) void {
-                listener(Tools.castPtr(a), b, c, d, e, f, g);
+                listener(Tools.castPtr(a), b, z, d, e, f, g);
             }
         },
 
@@ -218,14 +222,14 @@ fn wrapFn(comptime T: type, comptime listener: anytype) T {
             fn wrap(
                 a: func.args[0].arg_type.?,
                 b: func.args[1].arg_type.?,
-                c: func.args[2].arg_type.?,
+                z: func.args[2].arg_type.?,
                 d: func.args[3].arg_type.?,
                 e: func.args[4].arg_type.?,
                 f: func.args[5].arg_type.?,
                 g: func.args[6].arg_type.?,
                 h: func.args[7].arg_type.?,
             ) callconv(.C) void {
-                listener(Tools.castPtr(a), b, c, d, e, f, g, h);
+                listener(Tools.castPtr(a), b, z, d, e, f, g, h);
             }
         },
 
@@ -243,4 +247,14 @@ pub fn createListener(comptime T: type, comptime F: type) T {
         }
     }
     return result;
+}
+
+pub fn waylandError() error{WaylandError} {
+    std.log.err("wayland error: {s}", .{strerror(@enumToInt(std.c.getErrno(-1)))});
+    return error.WaylandError;
+}
+
+pub fn gtkError(err: *c.GError) error{GtkError} {
+    std.log.err("gtk error: {s}", .{err.message});
+    return error.GtkError;
 }

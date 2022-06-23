@@ -1,6 +1,7 @@
 //! The interface to Wayland.
 
 const allocator = @import("main.zig").allocator;
+const Buffer = @import("Buffer.zig");
 const c = @import("c.zig");
 const Config = @import("Config.zig");
 const Element = @import("Element.zig");
@@ -28,17 +29,15 @@ wl_surface: *c.wl_surface,
 /// Current layer surface object
 layer_surface: *c.zwlr_layer_surface_v1,
 /// The current pixel buffer, or bull if not currently allocated.
-buffer: ?[]align(std.mem.page_size) u8 = null,
-/// The buffer file descriptor, or -1 if not currently opened.
-buffer_fd: std.c.fd_t = -1,
+buffer: ?Buffer = null,
 /// The currnt shm pool buffer, or bull if not currently allocated.
 pool_buffer: ?*c.wl_buffer = null,
 /// When set to true, events stop being dispatched.
 should_close: bool = false,
 /// The current width of the surface.
-width: u32 = 0,
+width: i32 = 0,
 /// The current height of the surface.
-height: u32 = 0,
+height: i32 = 0,
 /// A list of toplevel info.
 toplevel_list: Toplevel.List = .{},
 /// Pointer info.
@@ -124,12 +123,12 @@ fn initInterfaces(display: *c.wl_display) !InterfaceList {
     errdefer specs.deinit();
 
     const registry = c.wl_display_get_registry(display) orelse
-        return error.WaylandError;
+        return util.waylandError();
     defer c.wl_registry_destroy(registry);
 
     _ = c.wl_registry_add_listener(registry, &registry_listener, &specs);
     if (c.wl_display_roundtrip(display) < 0) {
-        return error.WaylandError;
+        return util.waylandError();
     }
 
     var bad_interfaces = false;
@@ -145,59 +144,21 @@ fn initInterfaces(display: *c.wl_display) !InterfaceList {
     return specs;
 }
 
-var shm_counter: u8 = 0;
-
-fn allocShm(self: *Client, size: usize) !std.os.fd_t {
-    const pid = std.os.linux.getpid();
-    const name = try std.fmt.allocPrintZ(allocator, "/ilbar-shm-{}-{x}-{}", .{
-        pid,
-        @ptrToInt(self),
-        shm_counter,
-    });
-    std.log.info("opening new shm file: {s}", .{name});
-    defer allocator.free(name);
-    shm_counter += 1;
-
-    const fd = std.c.shm_open(name, std.os.O.RDWR | std.os.O.CREAT | std.os.O.EXCL, 0o600);
-    if (fd < 0) return error.ShmError;
-    errdefer std.os.close(fd);
-    _ = std.c.shm_unlink(name);
-
-    if (std.c.ftruncate(fd, @intCast(std.c.off_t, size)) < 0) {
-        return error.ShmError;
-    }
-
-    return fd;
-}
-
-fn updateShm(self: *Client, width: u32, height: u32) !void {
-    const new_size = try std.math.mul(u32, try std.math.mul(u32, width, height), 4);
-    const old_size = self.width * self.height * 4;
-    if (old_size == new_size) return;
-    const fd = try self.allocShm(new_size);
-    errdefer std.os.close(fd);
-    const buffer = try std.os.mmap(
-        null,
-        new_size,
-        std.os.PROT.READ | std.os.PROT.WRITE,
-        std.os.MAP.SHARED,
-        fd,
-        0,
-    );
-    if (self.buffer) |b| std.os.munmap(b);
-    self.buffer = buffer;
-    if (self.buffer_fd >= 0) std.os.close(self.buffer_fd);
-    self.buffer_fd = fd;
-    self.width = width;
-    self.height = height;
-}
-
 const surface_listener = util.createListener(c.zwlr_layer_surface_v1_listener, struct {
     pub fn configure(client: *Client, surface: ?*c.zwlr_layer_surface_v1, serial: u32, width: u32, height: u32) void {
+        if (width > std.math.maxInt(i32) or height > std.math.maxInt(i32)) return;
+
         c.zwlr_layer_surface_v1_ack_configure(surface, serial);
-        client.updateShm(width, height) catch |err| {
-            std.log.err("failed to update shm: {}", .{err});
-        };
+        if (width * height != client.width * client.height) {
+            const new_buffer = Buffer.init(width, height) catch |err| {
+                std.log.err("failed to allocate pixel buffer: {}", .{err});
+                return;
+            };
+            if (client.buffer) |old_buffer| old_buffer.deinit();
+            client.buffer = new_buffer;
+            client.width = @intCast(i32, width);
+            client.height = @intCast(i32, height);
+        }
         client.updateGui();
     }
 
@@ -211,7 +172,7 @@ const surface_listener = util.createListener(c.zwlr_layer_surface_v1_listener, s
 
 pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     const display = c.wl_display_connect(display_name) orelse
-        return error.DisplayConnectFailed;
+        return util.waylandError();
     errdefer c.wl_display_disconnect(display);
 
     const specs = try initInterfaces(display);
@@ -228,7 +189,7 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     errdefer c.zwlr_foreign_toplevel_manager_v1_destroy(toplevel_manager);
 
     const wl_surface = c.wl_compositor_create_surface(compositor) orelse
-        return error.WaylandError;
+        return util.waylandError();
     errdefer c.wl_surface_destroy(wl_surface);
 
     const layer_surface = c.zwlr_layer_shell_v1_get_layer_surface(
@@ -237,7 +198,7 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
         null,
         c.ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
         "ilbar",
-    ) orelse return error.WaylandError;
+    ) orelse return util.waylandError();
     errdefer c.zwlr_layer_surface_v1_destroy(layer_surface);
 
     c.zwlr_layer_surface_v1_set_anchor(
@@ -246,8 +207,8 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
             c.ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
             c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM,
     );
-    c.zwlr_layer_surface_v1_set_size(layer_surface, 0, @intCast(u32, config.height));
-    c.zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, @intCast(i32, config.height));
+    c.zwlr_layer_surface_v1_set_size(layer_surface, 0, config.height);
+    c.zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, config.height);
 
     c.wl_surface_commit(wl_surface);
 
@@ -283,8 +244,7 @@ pub fn deinit(self: *Client) void {
     self.pointer_manager.deinit();
     self.toplevel_list.deinit();
     if (self.pool_buffer) |pool_buffer| c.wl_buffer_destroy(pool_buffer);
-    if (self.buffer) |buffer| std.os.munmap(buffer);
-    if (self.buffer_fd >= 0) std.os.close(self.buffer_fd);
+    if (self.buffer) |buffer| buffer.deinit();
     c.wl_surface_destroy(self.wl_surface);
     c.wl_seat_destroy(self.seat);
     c.zwlr_layer_shell_v1_destroy(self.layer_shell);
@@ -316,7 +276,7 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_
     var text_x = self.config.margin;
     var text_width = self.config.width - (2 * self.config.margin);
     if (toplevel.app_id) |app_id| {
-        if (self.icons.get(app_id) catch null) |image| {
+        if (try self.icons.get(app_id)) |image| {
             errdefer c.cairo_surface_destroy(image);
             const icon = try button.initChild(&Element.image_class);
             icon.x = self.config.*.margin;
@@ -328,9 +288,9 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_
     }
     const text = try button.initChild(&Element.text_class);
     text.x = text_x;
-    text.y = @floatToInt(c_int, (@intToFloat(f64, button.height) - self.font_height) / 2);
+    text.y = @floatToInt(i32, (@intToFloat(f64, button.height) - self.font_height) / 2);
     text.width = text_width;
-    text.height = @floatToInt(c_int, self.font_height);
+    text.height = @floatToInt(i32, self.font_height);
     if (toplevel.title) |title| {
         text.data = .{ .text = try allocator.dupeZ(u8, title) };
     } else {
@@ -340,8 +300,8 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: c_
 
 fn createGui(self: *Client) !*Element {
     const root = try Element.init();
-    root.width = @intCast(c_int, self.width);
-    root.height = @intCast(c_int, self.height);
+    root.width = self.width;
+    root.height = self.height;
     var x = self.config.margin;
 
     var it = self.toplevel_list.list.first;
@@ -411,27 +371,22 @@ const buffer_listener = util.createListener(c.wl_buffer_listener, struct {
 
 fn refreshPoolBuffer(self: *Client) !*c.wl_buffer {
     const size = self.width * self.height * 4;
-    const pool = c.wl_shm_create_pool(self.shm, self.buffer_fd, @intCast(i32, size)) orelse return error.WaylandError;
+    const pool = c.wl_shm_create_pool(self.shm, self.buffer.?.file.handle, size) orelse
+        return util.waylandError();
     defer c.wl_shm_pool_destroy(pool);
     const format: u32 = switch (@import("builtin").target.cpu.arch.endian()) {
         .Big => c.WL_SHM_FORMAT_BGRX8888,
         .Little => c.WL_SHM_FORMAT_XRGB8888,
     };
-    const pool_buffer = c.wl_shm_pool_create_buffer(
-        pool,
-        0,
-        @intCast(i32, self.width),
-        @intCast(i32, self.height),
-        @intCast(i32, self.width * 4),
-        format,
-    ) orelse return error.WaylandError;
+    const pool_buffer = c.wl_shm_pool_create_buffer(pool, 0, self.width, self.height, self.width * 4, format) orelse
+        return util.waylandError();
     _ = c.wl_buffer_add_listener(pool_buffer, &buffer_listener, self);
     return pool_buffer;
 }
 
 fn rerender(self: *Client) void {
     // stub
-    if (self.buffer != null and self.buffer_fd >= 0 and self.gui != null) {
+    if (self.buffer != null and self.gui != null) {
         if (self.pool_buffer == null) {
             self.pool_buffer = self.refreshPoolBuffer() catch |err| {
                 std.log.err("failed to create pool buffer: {}", .{err});
@@ -441,6 +396,6 @@ fn rerender(self: *Client) void {
         self.gui.?.render(self);
         c.wl_surface_attach(self.wl_surface, self.pool_buffer.?, 0, 0);
         c.wl_surface_commit(self.wl_surface);
-        c.wl_surface_damage(self.wl_surface, 0, 0, @intCast(i32, self.width), @intCast(i32, self.height));
+        c.wl_surface_damage(self.wl_surface, 0, 0, self.width, self.height);
     }
 }

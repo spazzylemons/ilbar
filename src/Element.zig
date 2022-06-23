@@ -117,10 +117,10 @@ parent: ?*Element = null,
 node: *std.TailQueue(Element).Node,
 children: std.TailQueue(Element) = .{},
 
-x: c_int = 0,
-y: c_int = 0,
-width: c_int = 0,
-height: c_int = 0,
+x: i32 = 0,
+y: i32 = 0,
+width: i32 = 0,
+height: i32 = 0,
 
 class: *const Class,
 
@@ -176,7 +176,7 @@ pub fn deinit(self: *Element) void {
     allocator.destroy(self.node);
 }
 
-pub fn press(self: *Element, x: c_int, y: c_int) bool {
+pub fn press(self: *Element, x: i32, y: i32) bool {
     if (x < 0 or x >= self.width) return false;
     if (y < 0 or y >= self.height) return false;
 
@@ -197,7 +197,7 @@ pub fn press(self: *Element, x: c_int, y: c_int) bool {
     return false;
 }
 
-pub fn motion(self: *Element, x: c_int, y: c_int) bool {
+pub fn motion(self: *Element, x: i32, y: i32) bool {
     if (self.pressed) {
         self.pressed_hover = x >= 0 and x < self.width and y >= 0 and y < self.height;
         return true;
@@ -252,11 +252,11 @@ pub fn renderChild(self: *Element, cr: *c.cairo_t) void {
 
 pub fn render(self: *Element, client: *Client) void {
     const surface = c.cairo_image_surface_create_for_data(
-        client.buffer.?.ptr,
+        client.buffer.?.memory.ptr,
         c.CAIRO_FORMAT_ARGB32,
-        @intCast(c_int, client.width),
-        @intCast(c_int, client.height),
-        @intCast(c_int, client.width * 4),
+        client.width,
+        client.height,
+        client.width * 4,
     ).?;
     defer c.cairo_surface_destroy(surface);
     const cr = c.cairo_create(surface).?;
