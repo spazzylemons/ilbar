@@ -10,7 +10,7 @@ A simple classic taskbar for Wayland desktops.
 - wayland-client
 - wayland-protocols
 - wayland-scanner
-- A C compiler
+- The latest version of Zig
 
 ## Usage requirements
 
@@ -22,7 +22,6 @@ following interfaces with at least the following versions:
 - wl_shm, version 1
 - zwlr_foreign_toplevel_manager_v1, version 3
 - zwlr_layer_shell_v1, version 4
-- zwp_relative_pointer_manager_v1, version 1
 
 You can check if your compositor supports these by using the `wayland-info`
 program from within your compositor.
