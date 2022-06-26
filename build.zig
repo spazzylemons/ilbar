@@ -94,6 +94,55 @@ const WaylandScannerStep = struct {
     }
 };
 
+const GdbusCodegenStep = struct {
+    step: std.build.Step,
+    b: *std.build.Builder,
+    src: []const u8,
+    dst_c_file: std.build.GeneratedFile,
+    dst_h_file: std.build.GeneratedFile,
+
+    fn create(b: *std.build.Builder, src: []const u8) *GdbusCodegenStep {
+        const self = b.allocator.create(GdbusCodegenStep) catch unreachable;
+        self.* = .{
+            .step = std.build.Step.init(.custom, "parse protocol", b.allocator, make),
+            .b = b,
+            .src = src,
+            .dst_c_file = .{ .step = &self.step },
+            .dst_h_file = .{ .step = &self.step },
+        };
+        return self;
+    }
+
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(WaylandScannerStep, "step", step);
+        const xml = self.b.fmt("{s}.xml", .{self.src});
+        const c_file = self.b.fmt("build/{s}.c", .{std.fs.path.basename(self.src)});
+        const h_file = self.b.fmt("build/{s}.h", .{std.fs.path.basename(self.src)});
+        var needs_generation = false;
+        _ = std.fs.cwd().statFile(c_file) catch {
+            needs_generation = true;
+        };
+        _ = std.fs.cwd().statFile(h_file) catch {
+            needs_generation = true;
+        };
+        if (needs_generation) {
+            self.b.allocator.free(runCommand(
+                self.b,
+                &.{
+                    "gdbus-codegen",
+                    "--generate-c-code",
+                    std.fs.path.basename(self.src),
+                    "--output-dir",
+                    "build",
+                    xml,
+                },
+            ));
+        }
+        self.dst_c_file.path = c_file;
+        self.dst_h_file.path = h_file;
+    }
+};
+
 pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
@@ -136,6 +185,12 @@ pub fn build(b: *std.build.Builder) !void {
             .args = &.{},
         });
     }
+
+    const codegen = GdbusCodegenStep.create(b, "lib/SNI");
+    exe.addCSourceFileSource(.{
+        .source = .{ .generated = &codegen.dst_c_file },
+        .args = &.{},
+    });
 
     exe.install();
 

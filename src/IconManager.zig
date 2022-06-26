@@ -155,10 +155,9 @@ fn putCache(
     if (value) |v| _ = c.cairo_surface_reference(v);
 }
 
-/// Get an icon as a surface directly from the icon name.
-pub fn getFromIconName(self: *IconManager, icon_name: [:0]const u8) !*c.cairo_surface_t {
+pub fn getIconFromTheme(theme: *c.GtkIconTheme, icon_name: [:0]const u8) !*c.cairo_surface_t {
     var err: ?*c.GError = null;
-    const pixbuf = c.gtk_icon_theme_load_icon(self.theme, icon_name, 16, 0, &err) orelse
+    const pixbuf = c.gtk_icon_theme_load_icon(theme, icon_name, 16, 0, &err) orelse
         return util.gtkError(err.?);
     errdefer c.g_object_unref(pixbuf);
 
@@ -193,9 +192,15 @@ pub fn getFromIconName(self: *IconManager, icon_name: [:0]const u8) !*c.cairo_su
             src += 4;
         }
         c.cairo_surface_mark_dirty(surface);
-        self.putCache(icon_name, .icon_name, surface);
         return surface;
     }
+}
+
+/// Get an icon as a surface directly from the icon name.
+pub fn getFromIconName(self: *IconManager, icon_name: [:0]const u8) !*c.cairo_surface_t {
+    const result = try getIconFromTheme(self.theme, icon_name);
+    self.putCache(icon_name, .icon_name, result);
+    return result;
 }
 
 /// Get an icon as a surface.

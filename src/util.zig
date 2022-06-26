@@ -256,5 +256,6 @@ pub fn waylandError() error{WaylandError} {
 
 pub fn gtkError(err: *c.GError) error{GtkError} {
     std.log.err("gtk error: {s}", .{err.message});
+    c.g_error_free(err);
     return error.GtkError;
 }

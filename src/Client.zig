@@ -5,11 +5,14 @@ const Buffer = @import("Buffer.zig");
 const c = @import("c.zig");
 const Config = @import("Config.zig");
 const Element = @import("Element.zig");
+const Host = @import("SNI/Host.zig");
+const Item = @import("SNI/Item.zig");
 const IconManager = @import("IconManager.zig");
 const PointerManager = @import("PointerManager.zig");
 const std = @import("std");
 const Toplevel = @import("Toplevel.zig");
 const util = @import("util.zig");
+const Watcher = @import("SNI/Watcher.zig");
 
 const Client = @This();
 /// The config settings
@@ -48,6 +51,10 @@ gui: ?*Element = null,
 font_height: f64,
 /// The icon manager.
 icons: IconManager,
+/// The taskbar SNI watcher.
+watcher: *Watcher,
+/// The taskbar SNI host.
+host: *Host,
 
 const InterfaceSpec = struct {
     /// The interface to bind to.
@@ -215,6 +222,12 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     const icons = try IconManager.init();
     errdefer icons.deinit();
 
+    const watcher = try Watcher.init();
+    errdefer watcher.deinit();
+
+    const host = try Host.init();
+    errdefer host.deinit();
+
     const self = try allocator.create(Client);
     errdefer allocator.destroy(self);
 
@@ -229,16 +242,21 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
         .layer_surface = layer_surface,
         .font_height = config.fontHeight(),
         .icons = icons,
+        .watcher = watcher,
+        .host = host,
     };
 
     self.toplevel_list.init(toplevel_manager);
     self.pointer_manager.init();
     _ = c.zwlr_layer_surface_v1_add_listener(layer_surface, &surface_listener, self);
+    self.host.client = self;
 
     return self;
 }
 
 pub fn deinit(self: *Client) void {
+    self.host.deinit();
+    self.watcher.deinit();
     self.icons.deinit();
     if (self.gui) |gui| gui.deinit();
     self.pointer_manager.deinit();
@@ -254,9 +272,66 @@ pub fn deinit(self: *Client) void {
     allocator.destroy(self);
 }
 
+const WaylandSource = struct {
+    source: c.GSource,
+    pfd: c.GPollFD,
+    display: *c.wl_display,
+
+    fn prepare(source: ?*c.GSource, timeout: ?*c.gint) callconv(.C) c.gboolean {
+        const self = @fieldParentPtr(WaylandSource, "source", source.?);
+        timeout.?.* = -1;
+        _ = c.wl_display_flush(self.display);
+        _ = c.wl_display_dispatch_pending(self.display);
+        return 0;
+    }
+
+    fn check(source: ?*c.GSource) callconv(.C) c.gboolean {
+        const self = @fieldParentPtr(WaylandSource, "source", source.?);
+        return @boolToInt(self.pfd.revents != 0);
+    }
+
+    fn dispatch(source: ?*c.GSource, callback: c.GSourceFunc, user_data: c.gpointer) callconv(.C) c.gboolean {
+        _ = callback;
+        _ = user_data;
+
+        const self = @fieldParentPtr(WaylandSource, "source", source.?);
+        if ((self.pfd.revents & c.G_IO_IN) != 0) {
+            _ = c.wl_display_dispatch(self.display);
+        } else if ((self.pfd.revents & (c.G_IO_ERR | c.G_IO_HUP)) != 0) {
+            return 0;
+        }
+        self.pfd.revents = 0;
+        return 1;
+    }
+
+    var funcs = c.GSourceFuncs{
+        .prepare = prepare,
+        .check = check,
+        .dispatch = dispatch,
+        .finalize = null,
+        .closure_callback = null,
+        .closure_marshal = null,
+    };
+};
+
 pub fn run(self: *Client) void {
-    while (!self.should_close and c.wl_display_dispatch(self.display) >= 0) {
-        // nothing to do
+    const ctx = c.g_main_context_default();
+
+    const source = c.g_source_new(&WaylandSource.funcs, @sizeOf(WaylandSource)).?;
+    defer c.g_source_unref(source);
+
+    const wayland_source = @fieldParentPtr(WaylandSource, "source", source);
+    wayland_source.display = self.display;
+    wayland_source.pfd.fd = c.wl_display_get_fd(self.display);
+    wayland_source.pfd.events = c.G_IO_IN | c.G_IO_ERR | c.G_IO_HUP;
+    wayland_source.pfd.revents = 0;
+    _ = c.g_source_add_poll(source, &wayland_source.pfd);
+
+    _ = c.g_source_attach(source, ctx);
+    defer c.g_source_destroy(source);
+
+    while (!self.should_close) {
+        _ = c.g_main_context_iteration(ctx, 1);
     }
 }
 
@@ -280,6 +355,8 @@ fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *
         icon.x = self.config.*.margin;
         icon.y = @divTrunc(button.height - 16, 2);
         icon.data = .{ .image = image };
+        icon.width = 16;
+        icon.height = 16;
         button.width += 16 + self.config.margin;
         text_x += 16 + self.config.margin;
     }
@@ -316,6 +393,8 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
             icon.x = self.config.*.margin;
             icon.y = @divTrunc(button.height - 16, 2);
             icon.data = .{ .image = image };
+            icon.width = 16;
+            icon.height = 16;
             text_x += 16 + self.config.margin;
             text_width -= 16 + self.config.margin;
         }
@@ -332,8 +411,21 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
     return button;
 }
 
+fn createNotifierIcon(self: *Client, item: *Item, root: *Element, x: i32) !?*Element {
+    const surface = item.surface orelse return null;
+    const icon = try root.initChild(&Element.image_class);
+    _ = c.cairo_surface_reference(surface);
+    icon.x = x;
+    icon.y = ((self.config.height - 14) / 2);
+    icon.width = 16;
+    icon.height = 16;
+    icon.data = .{ .image = surface };
+    return icon;
+}
+
 fn createGui(self: *Client) !*Element {
     const root = try Element.init();
+    errdefer root.deinit();
     root.width = self.width;
     root.height = self.height;
     var x: i32 = self.config.margin;
@@ -354,6 +446,20 @@ fn createGui(self: *Client) !*Element {
             std.log.warn("failed to create a taskbar button: {}", .{err});
         }
         it = node.next;
+    }
+
+    x = self.width - self.config.margin - 16;
+
+    var it2 = self.host.items.first;
+    while (it2) |node| {
+        if (self.createNotifierIcon(&node.data, root, x)) |icon| {
+            if (icon) |i| {
+                x -= i.width + self.config.margin;
+            }
+        } else |err| {
+            std.log.warn("failed to create a notifier icon: {}", .{err});
+        }
+        it2 = node.next;
     }
 
     return root;

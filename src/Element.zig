@@ -145,6 +145,11 @@ pub const image_class = makeClass(struct {
 
     pub fn render(self: *Element, cr: *c.cairo_t) void {
         if (self.data.image) |image| {
+            const width = c.cairo_image_surface_get_width(image);
+            const height = c.cairo_image_surface_get_height(image);
+            const h_scale = @intToFloat(f64, self.width) / @intToFloat(f64, width);
+            const v_scale = @intToFloat(f64, self.height) / @intToFloat(f64, height);
+            c.cairo_scale(cr, h_scale, v_scale);
             c.cairo_set_source_surface(cr, image, 0, 0);
             c.cairo_mask_surface(cr, image, 0, 0);
             c.cairo_fill(cr);
