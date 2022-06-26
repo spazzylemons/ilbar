@@ -7,29 +7,21 @@ const std = @import("std");
 
 const Host = @This();
 
-name: [:0]const u8,
-path: [:0]const u8,
+host_id: c.guint = undefined,
+watcher_id: c.guint = 0,
 
-host_id: c.guint,
-watcher_id: c.guint,
+cancellable: ?*c.GCancellable = null,
+watcher: ?*c.OrgKdeStatusNotifierWatcher = null,
 
-cancellable: ?*c.GCancellable,
-watcher: ?*c.OrgKdeStatusNotifierWatcher,
+items: std.TailQueue(Item) = .{},
 
-items: std.TailQueue(Item),
-
-client: ?*Client,
-
-pub fn init() !*Host {
-    const self = try allocator.create(Host);
-    errdefer allocator.destroy(self);
-
-    self.name = try std.fmt.allocPrintZ(allocator, "org.kde.StatusNotifierHost-{}", .{std.os.linux.getpid()});
-    errdefer allocator.free(self.name);
+pub fn init(self: *Host) void {
+    var name_buf: [std.fmt.count("org.kde.StatusNotifierHost-{}", .{std.math.maxInt(std.os.pid_t)}) + 1]u8 = undefined;
+    const name = std.fmt.bufPrintZ(&name_buf, "org.kde.StatusNotifierHost-{}", .{std.os.linux.getpid()}) catch unreachable;
 
     self.host_id = c.g_bus_own_name(
         c.G_BUS_TYPE_SESSION,
-        self.name.ptr,
+        name.ptr,
         c.G_BUS_NAME_OWNER_FLAGS_NONE,
         onBusAcquired,
         null,
@@ -38,19 +30,6 @@ pub fn init() !*Host {
         null,
     );
     errdefer c.g_bus_unown_name(self.host_id);
-
-    self.path = try std.fmt.allocPrintZ(allocator, "/StatusNotifierHost/{}", .{self.host_id});
-    errdefer allocator.free(self.path);
-
-    self.watcher_id = 0;
-    self.cancellable = null;
-    self.watcher = null;
-
-    self.items = .{};
-
-    self.client = null;
-
-    return self;
 }
 
 pub fn deinit(self: *Host) void {
@@ -69,9 +48,10 @@ pub fn deinit(self: *Host) void {
         node.data.deinit();
         allocator.destroy(node);
     }
-    allocator.free(self.name);
-    allocator.free(self.path);
-    allocator.destroy(self);
+}
+
+inline fn client(self: *Host) *Client {
+    return @fieldParentPtr(Client, "host", self);
 }
 
 fn onBusAcquired(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.gpointer) callconv(.C) void {
@@ -122,9 +102,12 @@ fn onNewProxy(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) ca
 
     self.watcher = watcher;
 
+    var path_buf: [std.fmt.count("/StatusNotifierHost/{}", .{std.math.maxInt(c.guint)}) + 1]u8 = undefined;
+    const path = std.fmt.bufPrintZ(&path_buf, "/StatusNotifierHost/{}", .{self.host_id}) catch unreachable;
+
     c.org_kde_status_notifier_watcher_call_register_status_notifier_host(
         watcher,
-        self.path.ptr,
+        path.ptr,
         self.cancellable,
         onRegisterHost,
         self,
@@ -152,15 +135,12 @@ fn onRegisterHost(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer
 
     var items = c.org_kde_status_notifier_watcher_get_registered_status_notifier_items(self.watcher) orelse return;
     while (items[0]) |item| {
-        std.log.info("item! {s}", .{item});
         self.addItem(item) catch {
             std.log.warn("failed to add item {s} on initialization", .{item});
         };
         items += 1;
     }
-    if (self.client) |cl| {
-        cl.updateGui();
-    }
+    self.client().updateGui();
 }
 
 fn onNameVanished(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.gpointer) callconv(.C) void {
@@ -178,9 +158,7 @@ fn onNameVanished(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.
         node.data.deinit();
         allocator.destroy(node);
     }
-    if (self.client) |cl| {
-        cl.updateGui();
-    }
+    self.client().updateGui();
 }
 
 fn onItemRegistered(watcher: *c.OrgKdeStatusNotifierWatcher, service: [*:0]const u8, self: *Host) callconv(.C) void {
@@ -188,9 +166,7 @@ fn onItemRegistered(watcher: *c.OrgKdeStatusNotifierWatcher, service: [*:0]const
     self.addItem(service) catch {
         std.log.warn("failed to add new item {s}", .{service});
     };
-    if (self.client) |cl| {
-        cl.updateGui();
-    }
+    self.client().updateGui();
 }
 
 fn onItemUnregistered(watcher: *c.OrgKdeStatusNotifierWatcher, service: [*:0]const u8, self: *Host) callconv(.C) void {
@@ -200,9 +176,7 @@ fn onItemUnregistered(watcher: *c.OrgKdeStatusNotifierWatcher, service: [*:0]con
         self.items.remove(node);
         allocator.destroy(node);
         std.log.info("removed item {s}", .{service});
-        if (self.client) |cl| {
-            cl.updateGui();
-        }
+        self.client().updateGui();
     }
 }
 
@@ -227,7 +201,7 @@ fn addItem(self: *Host, service: [*:0]const u8) !void {
     const node = try allocator.create(std.TailQueue(Item).Node);
     errdefer allocator.destroy(node);
 
-    try node.data.init(self.client.?, service);
+    try node.data.init(self.client(), service);
     errdefer node.data.deinit();
 
     self.items.append(node);

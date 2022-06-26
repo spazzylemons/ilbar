@@ -6,31 +6,49 @@ const std = @import("std");
 const Element = @This();
 
 const Class = struct {
-    freeData: ?fn (self: *Element) void = null,
-    release: ?fn (self: *Element) void = null,
-    render: ?fn (self: *Element, cr: *c.cairo_t) void = null,
+    destroy: fn (self: *Element) void,
+    release: ?fn (self: *Element) void,
+    render: ?fn (self: *Element, cr: *c.cairo_t) void,
 };
 
 fn makeClass(comptime T: type) Class {
-    var result = Class{};
-    inline for (@typeInfo(T).Struct.decls) |field| {
-        @field(result, field.name) = @field(T, field.name);
+    var result: Class = undefined;
+    inline for (@typeInfo(Class).Struct.fields) |field| {
+        if (@hasDecl(T, field.name)) {
+            @field(result, field.name) = @field(T, field.name);
+        } else {
+            @field(result, field.name) = null;
+        }
     }
     return result;
 }
 
-const root_class = makeClass(struct {
-    pub fn render(self: *Element, cr: *c.cairo_t) void {
-        c.cairo_set_source_rgb(cr, 0.75, 0.75, 0.75);
-        c.cairo_rectangle(cr, 0, 0, @intToFloat(f64, self.width), @intToFloat(f64, self.height));
-        c.cairo_fill(cr);
+pub const Root = struct {
+    const class = makeClass(struct {
+        pub fn destroy(self: *Element) void {
+            allocator.destroy(self);
+        }
 
-        c.cairo_set_source_rgb(cr, 1, 1, 1);
-        c.cairo_move_to(cr, 0, 1.5);
-        c.cairo_rel_line_to(cr, @intToFloat(f64, self.width), 0);
-        c.cairo_stroke(cr);
+        pub fn render(self: *Element, cr: *c.cairo_t) void {
+            c.cairo_set_source_rgb(cr, 0.75, 0.75, 0.75);
+            c.cairo_rectangle(cr, 0, 0, @intToFloat(f64, self.width), @intToFloat(f64, self.height));
+            c.cairo_fill(cr);
+
+            c.cairo_set_source_rgb(cr, 1, 1, 1);
+            c.cairo_move_to(cr, 0, 1.5);
+            c.cairo_rel_line_to(cr, @intToFloat(f64, self.width), 0);
+            c.cairo_stroke(cr);
+        }
+    });
+
+    element: Element,
+
+    pub fn init() !*Root {
+        const self = try allocator.create(Root);
+        self.element = .{ .class = &class };
+        return self;
     }
-});
+};
 
 fn renderButton(self: *Element, cr: *c.cairo_t) void {
     const left: f64 = 0.5;
@@ -63,63 +81,124 @@ fn renderButton(self: *Element, cr: *c.cairo_t) void {
     c.cairo_stroke(cr);
 }
 
-pub const window_button_class = makeClass(struct {
-    pub fn release(self: *Element) void {
-        c.zwlr_foreign_toplevel_handle_v1_activate(
-            self.data.window_button.handle,
-            self.data.window_button.seat,
-        );
+pub const WindowButton = struct {
+    const class = makeClass(struct {
+        inline fn unwrap(self: *Element) *WindowButton {
+            return @fieldParentPtr(WindowButton, "node", self.getNode());
+        }
+
+        pub fn destroy(self: *Element) void {
+            allocator.destroy(unwrap(self));
+        }
+
+        pub fn release(self: *Element) void {
+            const window_button = unwrap(self);
+
+            c.zwlr_foreign_toplevel_handle_v1_activate(
+                window_button.handle,
+                window_button.seat,
+            );
+        }
+
+        pub const render = renderButton;
+    });
+
+    node: std.TailQueue(Element).Node,
+    handle: *c.zwlr_foreign_toplevel_handle_v1,
+    seat: *c.wl_seat,
+
+    pub fn init(parent: *Element, handle: *c.zwlr_foreign_toplevel_handle_v1, seat: *c.wl_seat) !*WindowButton {
+        const self = try allocator.create(WindowButton);
+        self.node = .{ .data = .{ .parent = parent, .class = &class } };
+        self.handle = handle;
+        self.seat = seat;
+        parent.children.append(&self.node);
+        return self;
     }
 
-    pub const render = renderButton;
-});
+    pub fn element(self: *WindowButton) *Element {
+        return &self.node.data;
+    }
+};
 
-fn setsid() std.os.pid_t {
-    return @bitCast(std.os.pid_t, @truncate(u32, std.os.linux.syscall0(.setsid)));
-}
+pub const ShortcutButton = struct {
+    const class = makeClass(struct {
+        inline fn unwrap(self: *Element) *ShortcutButton {
+            return @fieldParentPtr(ShortcutButton, "node", self.getNode());
+        }
 
-pub const shortcut_button_class = makeClass(struct {
-    pub fn release(self: *Element) void {
-        const child = std.os.fork() catch |err| {
-            std.log.warn("shortcut: fork failed: {}", .{err});
-            return;
-        };
+        fn setsid() std.os.pid_t {
+            return @bitCast(std.os.pid_t, @truncate(u32, std.os.linux.syscall0(.setsid)));
+        }
 
-        if (child == 0) {
-            // make us a session leader so we don't terminate if the taskbar closes
-            if (setsid() < 0) {
-                std.log.warn("shortcut: setsid failed", .{});
-            }
+        pub fn destroy(self: *Element) void {
+            allocator.destroy(unwrap(self));
+        }
 
-            const grandchild = std.os.fork() catch |err| {
+        pub fn release(self: *Element) void {
+            const shortcut_button = unwrap(self);
+
+            const child = std.os.fork() catch |err| {
                 std.log.warn("shortcut: fork failed: {}", .{err});
                 return;
             };
 
-            if (grandchild == 0) {
-                const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", self.data.command, null };
-                const err = std.os.execveZ("/bin/sh", &argv, std.c.environ);
-                std.log.warn("shortcut: execv failed: {}", .{err});
+            if (child == 0) {
+                // make us a session leader so we don't terminate if the taskbar closes
+                if (setsid() < 0) {
+                    std.log.warn("shortcut: setsid failed", .{});
+                }
+
+                const grandchild = std.os.fork() catch |err| {
+                    std.log.warn("shortcut: fork failed: {}", .{err});
+                    return;
+                };
+
+                if (grandchild == 0) {
+                    const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shortcut_button.command, null };
+                    const err = std.os.execveZ("/bin/sh", &argv, std.c.environ);
+                    std.log.warn("shortcut: execv failed: {}", .{err});
+                }
+
+                std.os.exit(0);
             }
 
-            std.os.exit(0);
+            _ = std.os.waitpid(child, 0);
         }
 
-        _ = std.os.waitpid(child, 0);
+        pub const render = renderButton;
+    });
+
+    node: std.TailQueue(Element).Node,
+    command: [*:0]const u8,
+
+    pub fn init(parent: *Element, command: [*:0]const u8) !*ShortcutButton {
+        const self = try allocator.create(ShortcutButton);
+        self.node = .{ .data = .{ .parent = parent, .class = &class } };
+        self.command = command;
+        parent.children.append(&self.node);
+        return self;
     }
 
-    pub const render = renderButton;
-});
+    pub fn element(self: *ShortcutButton) *Element {
+        return &self.node.data;
+    }
+};
 
-pub const text_class = makeClass(struct {
-    pub fn freeData(self: *Element) void {
-        if (self.data.text) |text| {
-            allocator.free(text);
+pub const Text = struct {
+    const class = makeClass(struct {
+        inline fn unwrap(self: *Element) *Text {
+            return @fieldParentPtr(Text, "node", self.getNode());
         }
-    }
 
-    pub fn render(self: *Element, cr: *c.cairo_t) void {
-        if (self.data.text) |text| {
+        pub fn destroy(self: *Element) void {
+            const text = unwrap(self);
+            allocator.free(text.text);
+            allocator.destroy(text);
+        }
+
+        pub fn render(self: *Element, cr: *c.cairo_t) void {
+            const text = unwrap(self).text.ptr;
             c.cairo_set_source_rgb(cr, 0, 0, 0);
 
             var fe: c.cairo_font_extents_t = undefined;
@@ -133,32 +212,67 @@ pub const text_class = makeClass(struct {
             c.cairo_translate(cr, 0, fe.ascent);
             c.cairo_show_text(cr, text);
         }
-    }
-});
+    });
 
-pub const image_class = makeClass(struct {
-    pub fn freeData(self: *Element) void {
-        if (self.data.image) |image| {
-            c.cairo_surface_destroy(image);
+    node: std.TailQueue(Element).Node,
+    text: [:0]const u8,
+
+    pub fn init(parent: *Element, text: [:0]const u8) !*Text {
+        const self = try allocator.create(Text);
+        self.node = .{ .data = .{ .parent = parent, .class = &class } };
+        self.text = text;
+        parent.children.append(&self.node);
+        return self;
+    }
+
+    pub fn element(self: *Text) *Element {
+        return &self.node.data;
+    }
+};
+
+pub const Image = struct {
+    const class = makeClass(struct {
+        inline fn unwrap(self: *Element) *Image {
+            return @fieldParentPtr(Image, "node", self.getNode());
         }
-    }
 
-    pub fn render(self: *Element, cr: *c.cairo_t) void {
-        if (self.data.image) |image| {
-            const width = c.cairo_image_surface_get_width(image);
-            const height = c.cairo_image_surface_get_height(image);
+        pub fn destroy(self: *Element) void {
+            const image = unwrap(self);
+            c.cairo_surface_destroy(image.surface);
+            allocator.destroy(image);
+        }
+
+        pub fn render(self: *Element, cr: *c.cairo_t) void {
+            const surface = unwrap(self).surface;
+            const width = c.cairo_image_surface_get_width(surface);
+            const height = c.cairo_image_surface_get_height(surface);
             const h_scale = @intToFloat(f64, self.width) / @intToFloat(f64, width);
             const v_scale = @intToFloat(f64, self.height) / @intToFloat(f64, height);
             c.cairo_scale(cr, h_scale, v_scale);
-            c.cairo_set_source_surface(cr, image, 0, 0);
-            c.cairo_mask_surface(cr, image, 0, 0);
+            c.cairo_set_source_surface(cr, surface, 0, 0);
+            c.cairo_mask_surface(cr, surface, 0, 0);
             c.cairo_fill(cr);
         }
+    });
+
+    node: std.TailQueue(Element).Node,
+    surface: *c.cairo_surface_t,
+
+    pub fn init(parent: *Element, surface: *c.cairo_surface_t) !*Image {
+        const self = try allocator.create(Image);
+        self.node = .{ .data = .{ .parent = parent, .class = &class } };
+        self.surface = surface;
+        parent.children.append(&self.node);
+        _ = c.cairo_surface_reference(surface);
+        return self;
     }
-});
+
+    pub fn element(self: *Image) *Element {
+        return &self.node.data;
+    }
+};
 
 parent: ?*Element = null,
-node: *std.TailQueue(Element).Node,
 children: std.TailQueue(Element) = .{},
 
 x: i32 = 0,
@@ -168,47 +282,15 @@ height: i32 = 0,
 
 class: *const Class,
 
-data: union {
-    text: ?[:0]const u8,
-    window_button: struct {
-        handle: *c.zwlr_foreign_toplevel_handle_v1,
-        seat: *c.wl_seat,
-    },
-    image: ?*c.cairo_surface_t,
-    command: [*:0]const u8,
-} = undefined,
-
 pressed: bool = false,
 
 pressed_hover: bool = false,
 
-pub fn init() !*Element {
-    const node = try allocator.create(std.TailQueue(Element).Node);
-    node.* = .{
-        .data = .{
-            .node = node,
-            .class = &root_class,
-        },
-    };
-    return &node.data;
-}
-
-pub fn initChild(parent: *Element, class: *const Class) !*Element {
-    const node = try allocator.create(std.TailQueue(Element).Node);
-    node.* = .{
-        .data = .{
-            .parent = parent,
-            .node = node,
-            .class = class,
-        },
-    };
-    parent.children.append(node);
-    return &node.data;
+inline fn getNode(self: *Element) *std.TailQueue(Element).Node {
+    return @fieldParentPtr(std.TailQueue(Element).Node, "data", self);
 }
 
 pub fn deinit(self: *Element) void {
-    if (self.class.freeData) |f| f(self);
-
     var it = self.children.first;
     while (it) |node| {
         it = node.next;
@@ -216,9 +298,9 @@ pub fn deinit(self: *Element) void {
     }
 
     if (self.parent) |parent| {
-        parent.children.remove(self.node);
+        parent.children.remove(self.getNode());
     }
-    allocator.destroy(self.node);
+    self.class.destroy(self);
 }
 
 pub fn press(self: *Element, x: i32, y: i32) bool {

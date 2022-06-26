@@ -52,9 +52,9 @@ font_height: f64,
 /// The icon manager.
 icons: IconManager,
 /// The taskbar SNI watcher.
-watcher: *Watcher,
+watcher: Watcher = .{},
 /// The taskbar SNI host.
-host: *Host,
+host: Host = .{},
 
 const InterfaceSpec = struct {
     /// The interface to bind to.
@@ -222,12 +222,6 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     const icons = try IconManager.init();
     errdefer icons.deinit();
 
-    const watcher = try Watcher.init();
-    errdefer watcher.deinit();
-
-    const host = try Host.init();
-    errdefer host.deinit();
-
     const self = try allocator.create(Client);
     errdefer allocator.destroy(self);
 
@@ -242,14 +236,13 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
         .layer_surface = layer_surface,
         .font_height = config.fontHeight(),
         .icons = icons,
-        .watcher = watcher,
-        .host = host,
     };
 
     self.toplevel_list.init(toplevel_manager);
     self.pointer_manager.init();
     _ = c.zwlr_layer_surface_v1_add_listener(layer_surface, &surface_listener, self);
-    self.host.client = self;
+    self.watcher.init();
+    self.host.init();
 
     return self;
 }
@@ -336,102 +329,93 @@ pub fn run(self: *Client) void {
 }
 
 fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *Element, x: i32) !*Element {
-    const button = try root.initChild(&Element.shortcut_button_class);
-    errdefer button.deinit();
+    const button = try Element.ShortcutButton.init(root, shortcut.command.ptr);
+    errdefer button.element().deinit();
 
     const text_width = @floatToInt(i32, self.config.textWidth(shortcut.text.ptr));
     var text_x = self.config.margin;
 
-    button.x = x;
-    button.y = 4;
-    button.width = text_width + (2 * self.config.margin) + 1;
-    button.height = self.config.height - 6;
-    button.data = .{ .command = shortcut.command.ptr };
+    button.element().x = x;
+    button.element().y = 4;
+    button.element().width = text_width + (2 * self.config.margin) + 1;
+    button.element().height = self.config.height - 6;
 
     if (shortcut.icon) |icon_name| {
         const image = try self.icons.getFromIconName(icon_name);
-        errdefer c.cairo_surface_destroy(image);
-        const icon = try button.initChild(&Element.image_class);
-        icon.x = self.config.*.margin;
-        icon.y = @divTrunc(button.height - 16, 2);
-        icon.data = .{ .image = image };
-        icon.width = 16;
-        icon.height = 16;
-        button.width += 16 + self.config.margin;
+        defer c.cairo_surface_destroy(image);
+        const icon = try Element.Image.init(button.element(), image);
+        icon.element().x = self.config.margin;
+        icon.element().y = @divTrunc(button.element().height - 16, 2);
+        icon.element().width = 16;
+        icon.element().height = 16;
+        button.element().width += 16 + self.config.margin;
         text_x += 16 + self.config.margin;
     }
-    const text = try button.initChild(&Element.text_class);
-    text.x = text_x;
-    text.y = @floatToInt(i32, (@intToFloat(f64, button.height) - self.font_height) / 2);
-    text.width = text_width;
-    text.height = @floatToInt(i32, self.font_height);
-    text.data = .{ .text = null };
-    text.data = .{ .text = try allocator.dupeZ(u8, shortcut.text) };
+    const shortcut_text = try allocator.dupeZ(u8, shortcut.text);
+    errdefer allocator.free(shortcut_text);
+    const text = try Element.Text.init(button.element(), shortcut_text);
+    text.element().x = text_x;
+    text.element().y = @floatToInt(i32, (@intToFloat(f64, button.element().height) - self.font_height) / 2);
+    text.element().width = text_width;
+    text.element().height = @floatToInt(i32, self.font_height);
 
-    return button;
+    return button.element();
 }
 
 fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i32) !*Element {
-    const button = try root.initChild(&Element.window_button_class);
-    errdefer button.deinit();
+    const button = try Element.WindowButton.init(root, toplevel.handle, self.seat);
+    errdefer button.element().deinit();
 
-    button.x = x;
-    button.y = 4;
-    button.width = self.config.width;
-    button.height = self.config.height - 6;
-    button.data = .{ .window_button = .{
-        .handle = toplevel.handle,
-        .seat = self.seat,
-    } };
+    button.element().x = x;
+    button.element().y = 4;
+    button.element().width = self.config.width;
+    button.element().height = self.config.height - 6;
 
     var text_x = self.config.margin;
     var text_width = self.config.width - (2 * self.config.margin);
     if (toplevel.app_id) |app_id| {
         if (try self.icons.getFromAppId(app_id)) |image| {
-            errdefer c.cairo_surface_destroy(image);
-            const icon = try button.initChild(&Element.image_class);
-            icon.x = self.config.*.margin;
-            icon.y = @divTrunc(button.height - 16, 2);
-            icon.data = .{ .image = image };
-            icon.width = 16;
-            icon.height = 16;
+            defer c.cairo_surface_destroy(image);
+            const icon = try Element.Image.init(button.element(), image);
+            icon.element().x = self.config.margin;
+            icon.element().y = @divTrunc(button.element().height - 16, 2);
+            icon.element().width = 16;
+            icon.element().height = 16;
             text_x += 16 + self.config.margin;
             text_width -= 16 + self.config.margin;
         }
     }
-    const text = try button.initChild(&Element.text_class);
-    text.x = text_x;
-    text.y = @floatToInt(i32, (@intToFloat(f64, button.height) - self.font_height) / 2);
-    text.width = text_width;
-    text.height = @floatToInt(i32, self.font_height);
-    text.data = .{ .text = null };
     if (toplevel.title) |title| {
-        text.data = .{ .text = try allocator.dupeZ(u8, title) };
+        const title_text = try allocator.dupeZ(u8, title);
+        errdefer allocator.free(title_text);
+        const text = try Element.Text.init(button.element(), title_text);
+        text.element().x = text_x;
+        text.element().y = @floatToInt(i32, (@intToFloat(f64, button.element().height) - self.font_height) / 2);
+        text.element().width = text_width;
+        text.element().height = @floatToInt(i32, self.font_height);
     }
-    return button;
+    return button.element();
 }
 
 fn createNotifierIcon(self: *Client, item: *Item, root: *Element, x: i32) !?*Element {
     const surface = item.surface orelse return null;
-    const icon = try root.initChild(&Element.image_class);
-    _ = c.cairo_surface_reference(surface);
-    icon.x = x;
-    icon.y = ((self.config.height - 14) / 2);
-    icon.width = 16;
-    icon.height = 16;
-    icon.data = .{ .image = surface };
-    return icon;
+    const icon = try Element.Image.init(root, surface);
+    icon.element().x = x;
+    icon.element().y = ((self.config.height - 14) / 2);
+    icon.element().width = 16;
+    icon.element().height = 16;
+    return icon.element();
 }
 
 fn createGui(self: *Client) !*Element {
-    const root = try Element.init();
-    errdefer root.deinit();
-    root.width = self.width;
-    root.height = self.height;
+    const root = try Element.Root.init();
+    errdefer root.element.deinit();
+    root.element.width = self.width;
+    root.element.height = self.height;
     var x: i32 = self.config.margin;
 
     for (self.config.shortcuts) |shortcut| {
-        if (self.createShortcutButton(&shortcut, root, x)) |button| {
+        if (self.createShortcutButton(&shortcut, &root.element, x)) |button| {
             x += button.width + self.config.margin;
         } else |err| {
             std.log.warn("failed to create a shortcut button: {}", .{err});
@@ -440,7 +424,7 @@ fn createGui(self: *Client) !*Element {
 
     var it = self.toplevel_list.list.first;
     while (it) |node| {
-        if (self.createTaskbarButton(&node.data, root, x)) |button| {
+        if (self.createTaskbarButton(&node.data, &root.element, x)) |button| {
             x += button.width + self.config.margin;
         } else |err| {
             std.log.warn("failed to create a taskbar button: {}", .{err});
@@ -452,7 +436,7 @@ fn createGui(self: *Client) !*Element {
 
     var it2 = self.host.items.first;
     while (it2) |node| {
-        if (self.createNotifierIcon(&node.data, root, x)) |icon| {
+        if (self.createNotifierIcon(&node.data, &root.element, x)) |icon| {
             if (icon) |i| {
                 x -= i.width + self.config.margin;
             }
@@ -462,7 +446,7 @@ fn createGui(self: *Client) !*Element {
         it2 = node.next;
     }
 
-    return root;
+    return &root.element;
 }
 
 pub fn updateGui(self: *Client) void {
@@ -533,7 +517,6 @@ fn refreshPoolBuffer(self: *Client) !*c.wl_buffer {
 }
 
 fn rerender(self: *Client) void {
-    // stub
     if (self.buffer != null and self.gui != null) {
         if (self.pool_buffer == null) {
             self.pool_buffer = self.refreshPoolBuffer() catch |err| {

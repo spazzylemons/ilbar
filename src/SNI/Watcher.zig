@@ -89,15 +89,13 @@ fn findObject(list: ObjectList, name: []const u8, path: []const u8) ?*ObjectList
     return null;
 }
 
-id: c.guint,
-watcher: *c.OrgKdeStatusNotifierWatcher,
+id: c.guint = undefined,
+watcher: *c.OrgKdeStatusNotifierWatcher = undefined,
 
-hosts: ObjectList,
-items: ObjectList,
+hosts: ObjectList = .{},
+items: ObjectList = .{},
 
-pub fn init() !*Watcher {
-    const self = try allocator.create(Watcher);
-
+pub fn init(self: *Watcher) void {
     self.id = c.g_bus_own_name(
         c.G_BUS_TYPE_SESSION,
         "org.kde.StatusNotifierWatcher",
@@ -110,11 +108,6 @@ pub fn init() !*Watcher {
     );
 
     self.watcher = c.org_kde_status_notifier_watcher_skeleton_new().?;
-
-    self.hosts = .{};
-    self.items = .{};
-
-    return self;
 }
 
 fn watcherSkeleton(self: *Watcher) *c.GDBusInterfaceSkeleton {
@@ -134,7 +127,6 @@ pub fn deinit(self: *Watcher) void {
     }
     c.g_bus_unown_name(self.id);
     c.g_dbus_interface_skeleton_unexport(self.watcherSkeleton());
-    allocator.destroy(self);
 }
 
 fn onBusAcquired(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.gpointer) callconv(.C) void {

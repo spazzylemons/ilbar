@@ -6,14 +6,16 @@ const util = @import("util.zig");
 
 const Toplevel = @This();
 
-/// A reference to the node.
-node: *std.TailQueue(Toplevel).Node,
 /// The window handle.
 handle: *c.zwlr_foreign_toplevel_handle_v1,
 /// THe last seen title.
 title: ?[:0]const u8,
 /// The last seen app ID.
 app_id: ?[:0]const u8,
+
+inline fn getNode(self: *Toplevel) *std.TailQueue(Toplevel).Node {
+    return @fieldParentPtr(std.TailQueue(Toplevel).Node, "data", self);
+}
 
 const handle_listener = util.createListener(c.zwlr_foreign_toplevel_handle_v1_listener, struct {
     pub fn title(
@@ -112,7 +114,6 @@ pub const List = struct {
         const node = try allocator.create(std.TailQueue(Toplevel).Node);
         node.* = .{
             .data = .{
-                .node = node,
                 .handle = handle,
                 .title = null,
                 .app_id = null,
@@ -136,11 +137,11 @@ pub const List = struct {
     }
 
     pub fn remove(self: *List, toplevel: *Toplevel) void {
-        self.list.remove(toplevel.node);
+        self.list.remove(toplevel.getNode());
         c.zwlr_foreign_toplevel_handle_v1_destroy(toplevel.handle);
         if (toplevel.title) |title| allocator.free(title);
         if (toplevel.app_id) |app_id| allocator.free(app_id);
-        allocator.destroy(toplevel.node);
+        allocator.destroy(toplevel.getNode());
     }
 
     pub fn clear(self: *List) void {
