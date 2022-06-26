@@ -9,6 +9,7 @@ const Host = @import("SNI/Host.zig");
 const Item = @import("SNI/Item.zig");
 const IconManager = @import("IconManager.zig");
 const PointerManager = @import("PointerManager.zig");
+const StatusCommand = @import("StatusCommand.zig");
 const std = @import("std");
 const Toplevel = @import("Toplevel.zig");
 const util = @import("util.zig");
@@ -55,6 +56,8 @@ icons: IconManager,
 watcher: Watcher = .{},
 /// The taskbar SNI host.
 host: Host = .{},
+/// The status command handler.
+status_command: StatusCommand = .{},
 
 const InterfaceSpec = struct {
     /// The interface to bind to.
@@ -248,6 +251,7 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
 }
 
 pub fn deinit(self: *Client) void {
+    self.status_command.deinit();
     self.host.deinit();
     self.watcher.deinit();
     self.icons.deinit();
@@ -307,8 +311,14 @@ const WaylandSource = struct {
     };
 };
 
-pub fn run(self: *Client) void {
+pub fn run(self: *Client) !void {
     const ctx = c.g_main_context_default();
+
+    const status_source = try self.status_command.createSource();
+    defer c.g_source_unref(status_source);
+
+    _ = c.g_source_attach(status_source, ctx);
+    defer c.g_source_destroy(status_source);
 
     const source = c.g_source_new(&WaylandSource.funcs, @sizeOf(WaylandSource)).?;
     defer c.g_source_unref(source);
@@ -332,12 +342,12 @@ fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *
     const button = try Element.ShortcutButton.init(root, shortcut.command.ptr);
     errdefer button.element().deinit();
 
-    const text_width = @floatToInt(i32, self.config.textWidth(shortcut.text.ptr));
+    const text_width = self.config.textWidth(shortcut.text.ptr);
     var text_x = self.config.margin;
 
     button.element().x = x;
     button.element().y = 4;
-    button.element().width = text_width + (2 * self.config.margin) + 1;
+    button.element().width = text_width + (2 * self.config.margin);
     button.element().height = self.config.height - 6;
 
     if (shortcut.icon) |icon_name| {
@@ -400,7 +410,7 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
 fn createNotifierIcon(self: *Client, item: *Item, root: *Element, x: i32) !?*Element {
     const surface = item.surface orelse return null;
     const icon = try Element.Image.init(root, surface);
-    icon.element().x = x;
+    icon.element().x = x - 16;
     icon.element().y = ((self.config.height - 14) / 2);
     icon.element().width = 16;
     icon.element().height = 16;
@@ -415,36 +425,35 @@ fn createGui(self: *Client) !*Element {
     var x: i32 = self.config.margin;
 
     for (self.config.shortcuts) |shortcut| {
-        if (self.createShortcutButton(&shortcut, &root.element, x)) |button| {
-            x += button.width + self.config.margin;
-        } else |err| {
-            std.log.warn("failed to create a shortcut button: {}", .{err});
-        }
+        const el = try self.createShortcutButton(&shortcut, &root.element, x);
+        x += el.width + self.config.margin;
     }
 
     var it = self.toplevel_list.list.first;
     while (it) |node| {
-        if (self.createTaskbarButton(&node.data, &root.element, x)) |button| {
-            x += button.width + self.config.margin;
-        } else |err| {
-            std.log.warn("failed to create a taskbar button: {}", .{err});
-        }
+        const el = try self.createTaskbarButton(&node.data, &root.element, x);
+        x += el.width + self.config.margin;
         it = node.next;
     }
 
-    x = self.width - self.config.margin - 16;
+    x = self.width - self.config.margin;
 
     var it2 = self.host.items.first;
     while (it2) |node| {
-        if (self.createNotifierIcon(&node.data, &root.element, x)) |icon| {
-            if (icon) |i| {
-                x -= i.width + self.config.margin;
-            }
-        } else |err| {
-            std.log.warn("failed to create a notifier icon: {}", .{err});
+        if (try self.createNotifierIcon(&node.data, &root.element, x)) |el| {
+            x -= el.width + self.config.margin;
         }
         it2 = node.next;
     }
+
+    const status_command_text = try allocator.dupeZ(u8, self.status_command.status);
+    errdefer allocator.free(status_command_text);
+    const status_command_width = self.config.textWidth(status_command_text.ptr);
+    x -= status_command_width;
+    const status_command = try Element.Text.init(&root.element, status_command_text);
+    status_command.element().x = x;
+    status_command.element().y = 4 + @floatToInt(i32, (@intToFloat(f64, self.config.height - 6) - self.font_height) / 2);
+    status_command.element().width = status_command_width;
 
     return &root.element;
 }

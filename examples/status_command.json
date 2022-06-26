@@ -1,0 +1,9 @@
+{
+    "comment": [
+        "The status_command option is a script run through sh. Every time a",
+        "full line is printed, it is displayed in the bottom-right. This can",
+        "be used to display any information you would like in text form. This",
+        "example command prints the battery level, updated every 30 seconds."
+    ],
+    "status_command": "while true; do echo Your battery is at $(cat /sys/class/power_supply/BAT0/capacity)%; sleep 30; done"
+}

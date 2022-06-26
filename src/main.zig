@@ -109,7 +109,10 @@ pub fn main() u8 {
         return 1;
     };
     defer client.deinit();
-    client.run();
+    client.run() catch |err| {
+        std.log.err("cient closed: {}", .{err});
+        return 1;
+    };
 
     return 0;
 }

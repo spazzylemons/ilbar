@@ -4,5 +4,6 @@
     "height": 28,
     "margin": 3,
     "width": 160,
-    "shortcuts": []
+    "shortcuts": [],
+    "status_command": "while true; do date +%H:%M; sleep 1; done"
 }

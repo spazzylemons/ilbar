@@ -16,9 +16,15 @@ height: u16 = 28,
 margin: u16 = 3,
 width: u16 = 160,
 shortcuts: []Shortcut = &.{},
+status_command: ?[]const u8 = null,
 
 pub fn fontName(self: Config) [:0]const u8 {
     return self.font orelse "FreeSans";
+}
+
+pub fn statusCommand(self: Config) []const u8 {
+    // default is to just display the time, updated every second
+    return self.status_command orelse "while true; do date +%H:%M; sleep 1; done";
 }
 
 fn readWholeFile(file: std.fs.File) ![]u8 {
@@ -38,7 +44,10 @@ pub fn parse(file: std.fs.File) !Config {
     defer allocator.free(source);
 
     var tokens = std.json.TokenStream.init(source);
-    const result = try std.json.parse(Config, &tokens, .{ .allocator = allocator });
+    const result = try std.json.parse(Config, &tokens, .{
+        .allocator = allocator,
+        .ignore_unknown_fields = true,
+    });
     if (result.height < 6) return error.InvalidNumber;
     return result;
 }
@@ -64,7 +73,7 @@ pub fn fontHeight(self: Config) f64 {
     return fe.height;
 }
 
-pub fn textWidth(self: Config, text: [*:0]const u8) f64 {
+pub fn textWidth(self: Config, text: [*:0]const u8) i32 {
     const target = c.cairo_recording_surface_create(c.CAIRO_CONTENT_COLOR_ALPHA, null);
     defer c.cairo_surface_destroy(target);
 
@@ -77,5 +86,5 @@ pub fn textWidth(self: Config, text: [*:0]const u8) f64 {
     var te: c.cairo_text_extents_t = undefined;
     c.cairo_text_extents(cr, text, &te);
 
-    return te.width;
+    return @floatToInt(i32, te.width) + 1;
 }

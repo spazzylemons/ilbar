@@ -147,11 +147,12 @@ pub const ShortcutButton = struct {
                 // make us a session leader so we don't terminate if the taskbar closes
                 if (setsid() < 0) {
                     std.log.warn("shortcut: setsid failed", .{});
+                    std.os.exit(1);
                 }
 
                 const grandchild = std.os.fork() catch |err| {
                     std.log.warn("shortcut: fork failed: {}", .{err});
-                    return;
+                    std.os.exit(1);
                 };
 
                 if (grandchild == 0) {
