@@ -404,16 +404,6 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
     return button.element();
 }
 
-fn createNotifierIcon(self: *Client, item: *Item, root: *Element, x: i32) !?*Element {
-    const surface = item.surface orelse return null;
-    const icon = try Element.Image.init(root, surface);
-    icon.element().x = x - self.config.icon_size;
-    icon.element().y = @divTrunc(self.config.height - self.config.icon_size + 2, 2);
-    icon.element().width = self.config.icon_size;
-    icon.element().height = self.config.icon_size;
-    return icon.element();
-}
-
 fn createGui(self: *Client) !*Element {
     const root = try Element.Root.init();
     errdefer root.element.deinit();
@@ -433,24 +423,35 @@ fn createGui(self: *Client) !*Element {
         it = node.next;
     }
 
-    x = self.width - self.config.margin;
-
-    var it2 = self.host.items.first;
-    while (it2) |node| {
-        if (try self.createNotifierIcon(&node.data, &root.element, x)) |el| {
-            x -= el.width + self.config.margin;
-        }
-        it2 = node.next;
-    }
-
     const status_command_text = try allocator.dupeZ(u8, self.status_command.status);
     errdefer allocator.free(status_command_text);
     const status_command_width = self.config.textWidth(status_command_text.ptr);
-    x -= status_command_width;
-    const status_command = try Element.Text.init(&root.element, status_command_text);
-    status_command.element().x = x;
-    status_command.element().y = @divTrunc(self.config.height - self.config.font_height + 2, 2);
+
+    const status_tray = try Element.StatusTray.init(&root.element);
+    status_tray.element().width = status_command_width + 2 * self.config.margin + (self.config.icon_size + self.config.margin) * @intCast(i32, self.host.items.len);
+    status_tray.element().height = self.config.height - 6;
+    status_tray.element().x = self.width - self.config.margin - status_tray.element().width;
+    status_tray.element().y = 4;
+
+    const status_command = try Element.Text.init(status_tray.element(), status_command_text);
+    status_command.element().x = self.config.margin;
+    status_command.element().y = @divTrunc((status_tray.element().height - self.config.font_height), 2);
     status_command.element().width = status_command_width;
+    status_command.element().height = self.config.font_height;
+
+    x = status_command.element().width + 2 * self.config.margin;
+    var it2 = self.host.items.first;
+    while (it2) |node| {
+        if (node.data.surface) |surface| {
+            const icon = try Element.Image.init(status_tray.element(), surface);
+            icon.element().x = x;
+            icon.element().y = @divTrunc(status_tray.element().height - self.config.icon_size, 2);
+            icon.element().width = self.config.icon_size;
+            icon.element().height = self.config.icon_size;
+        }
+        x += self.config.icon_size + self.config.margin;
+        it2 = node.next;
+    }
 
     return &root.element;
 }

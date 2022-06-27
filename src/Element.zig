@@ -127,6 +127,52 @@ pub const WindowButton = struct {
     }
 };
 
+pub const StatusTray = struct {
+    const class = makeClass(struct {
+        inline fn unwrap(self: *Element) *StatusTray {
+            return @fieldParentPtr(StatusTray, "node", self.getNode());
+        }
+
+        pub fn destroy(self: *Element) void {
+            allocator.destroy(unwrap(self));
+        }
+
+        pub fn render(self: *Element, cr: *c.cairo_t, config: *const Config) void {
+            _ = config;
+
+            const left: f64 = 0.5;
+            const right = left + @intToFloat(f64, self.width) - 1;
+            const top: f64 = 0.5;
+            const bottom = top + @intToFloat(f64, self.height) - 1;
+
+            c.cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
+            c.cairo_move_to(cr, left, bottom);
+            c.cairo_line_to(cr, left, top);
+            c.cairo_line_to(cr, right, top);
+            c.cairo_stroke(cr);
+
+            c.cairo_set_source_rgb(cr, 1, 1, 1);
+            c.cairo_move_to(cr, right, top);
+            c.cairo_line_to(cr, right, bottom);
+            c.cairo_line_to(cr, left, bottom);
+            c.cairo_stroke(cr);
+        }
+    });
+
+    node: std.TailQueue(Element).Node,
+
+    pub fn init(parent: *Element) !*StatusTray {
+        const self = try allocator.create(StatusTray);
+        self.node = .{ .data = .{ .parent = parent, .class = &class } };
+        parent.children.append(&self.node);
+        return self;
+    }
+
+    pub fn element(self: *StatusTray) *Element {
+        return &self.node.data;
+    }
+};
+
 pub const ShortcutButton = struct {
     const class = makeClass(struct {
         inline fn unwrap(self: *Element) *ShortcutButton {
