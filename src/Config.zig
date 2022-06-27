@@ -22,11 +22,13 @@ const default_status_command = "while true; do date +%H:%M; sleep 1; done";
 /// The font used on the taskbar.
 font: *c.PangoFontDescription,
 /// The height of the taskbar.
-height: u16 = 28,
+height: i32 = 28,
 /// The spacing between various elements.
-margin: u16 = 3,
+margin: i32 = 3,
 /// The width of each button.
-width: u16 = 160,
+width: i32 = 160,
+/// The size of an icon.
+icon_size: i32 = 16,
 /// The shortcuts.
 shortcuts: []Shortcut = &.{},
 /// THe command to run to display a status.
@@ -168,6 +170,10 @@ fn parseRootConfig(self: *Config, value: c.CJValue) !void {
 
     if (getNumber(value.as.object, "width", 0)) |v| {
         self.width = v;
+    }
+
+    if (getNumber(value.as.object, "icon_size", 0)) |v| {
+        self.icon_size = v;
     }
 
     if (try getString(value.as.object, "status_command", false)) |v| {

@@ -104,10 +104,10 @@ fn getIconFromIconName(self: *Item) !?*c.cairo_surface_t {
         const theme = c.gtk_icon_theme_new().?;
         defer c.g_object_unref(theme);
         c.gtk_icon_theme_append_search_path(theme, icon_theme_path);
-        return try IconManager.getIconFromTheme(theme, std.mem.span(icon_name));
+        return try IconManager.getIconFromTheme(theme, self.client.config.icon_size, std.mem.span(icon_name));
     }
     // otherwise, use the default theme
-    return try self.client.icons.getFromIconName(std.mem.span(icon_name));
+    return try self.client.icons.getFromIconName(self.client.config.icon_size, std.mem.span(icon_name));
 }
 
 fn getIconFromPixmap(self: *Item) !?*c.cairo_surface_t {
@@ -127,7 +127,7 @@ fn getIconFromPixmap(self: *Item) !?*c.cairo_surface_t {
 
     // find the largest image, or the one with the exact dimensions we want
     while (c.g_variant_iter_next(it, "(ii@ay)", &width, &height, &pixels) != 0) {
-        const is_exact = width == 16 and height == 16;
+        const is_exact = width == self.client.config.icon_size and height == self.client.config.icon_size;
         if (is_exact or (width > best_width and height > best_height)) {
             best_width = width;
             best_height = height;

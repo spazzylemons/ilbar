@@ -215,7 +215,7 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
             c.ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
             c.ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM,
     );
-    c.zwlr_layer_surface_v1_set_size(layer_surface, 0, config.height);
+    c.zwlr_layer_surface_v1_set_size(layer_surface, 0, @intCast(u32, config.height));
     c.zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, config.height);
 
     c.wl_surface_commit(wl_surface);
@@ -348,15 +348,15 @@ fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *
     button.element().height = self.config.height - 6;
 
     if (shortcut.icon) |icon_name| {
-        const image = try self.icons.getFromIconName(icon_name);
+        const image = try self.icons.getFromIconName(self.config.icon_size, icon_name);
         defer c.cairo_surface_destroy(image);
         const icon = try Element.Image.init(button.element(), image);
         icon.element().x = self.config.margin;
-        icon.element().y = @divTrunc(button.element().height - 16, 2);
-        icon.element().width = 16;
-        icon.element().height = 16;
-        button.element().width += 16 + self.config.margin;
-        text_x += 16 + self.config.margin;
+        icon.element().y = @divTrunc(button.element().height - self.config.icon_size, 2);
+        icon.element().width = self.config.icon_size;
+        icon.element().height = self.config.icon_size;
+        button.element().width += self.config.icon_size + self.config.margin;
+        text_x += self.config.icon_size + self.config.margin;
     }
     const shortcut_text = try allocator.dupeZ(u8, shortcut.text);
     errdefer allocator.free(shortcut_text);
@@ -381,15 +381,15 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
     var text_x = self.config.margin;
     var text_width = self.config.width - (2 * self.config.margin);
     if (toplevel.app_id) |app_id| {
-        if (try self.icons.getFromAppId(app_id)) |image| {
+        if (try self.icons.getFromAppId(self.config.icon_size, app_id)) |image| {
             defer c.cairo_surface_destroy(image);
             const icon = try Element.Image.init(button.element(), image);
             icon.element().x = self.config.margin;
-            icon.element().y = @divTrunc(button.element().height - 16, 2);
-            icon.element().width = 16;
-            icon.element().height = 16;
-            text_x += 16 + self.config.margin;
-            text_width -= 16 + self.config.margin;
+            icon.element().y = @divTrunc(button.element().height - self.config.icon_size, 2);
+            icon.element().width = self.config.icon_size;
+            icon.element().height = self.config.icon_size;
+            text_x += self.config.icon_size + self.config.margin;
+            text_width -= self.config.icon_size + self.config.margin;
         }
     }
     if (toplevel.title) |title| {
@@ -407,10 +407,10 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
 fn createNotifierIcon(self: *Client, item: *Item, root: *Element, x: i32) !?*Element {
     const surface = item.surface orelse return null;
     const icon = try Element.Image.init(root, surface);
-    icon.element().x = x - 16;
-    icon.element().y = ((self.config.height - 14) / 2);
-    icon.element().width = 16;
-    icon.element().height = 16;
+    icon.element().x = x - self.config.icon_size;
+    icon.element().y = @divTrunc(self.config.height - self.config.icon_size + 2, 2);
+    icon.element().width = self.config.icon_size;
+    icon.element().height = self.config.icon_size;
     return icon.element();
 }
 

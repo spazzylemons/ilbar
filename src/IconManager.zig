@@ -155,9 +155,9 @@ fn putCache(
     if (value) |v| _ = c.cairo_surface_reference(v);
 }
 
-pub fn getIconFromTheme(theme: *c.GtkIconTheme, icon_name: [:0]const u8) !*c.cairo_surface_t {
+pub fn getIconFromTheme(theme: *c.GtkIconTheme, size: i32, icon_name: [:0]const u8) !*c.cairo_surface_t {
     var err: ?*c.GError = null;
-    const pixbuf = c.gtk_icon_theme_load_icon(theme, icon_name, 16, 0, &err);
+    const pixbuf = c.gtk_icon_theme_load_icon(theme, icon_name, size, 0, &err);
     if (err) |e| {
         util.warn(@src(), "failed to load icon: {s}", .{e.message});
         c.g_error_free(e);
@@ -201,14 +201,14 @@ pub fn getIconFromTheme(theme: *c.GtkIconTheme, icon_name: [:0]const u8) !*c.cai
 }
 
 /// Get an icon as a surface directly from the icon name.
-pub fn getFromIconName(self: *IconManager, icon_name: [:0]const u8) !*c.cairo_surface_t {
-    const result = try getIconFromTheme(self.theme, icon_name);
+pub fn getFromIconName(self: *IconManager, size: i32, icon_name: [:0]const u8) !*c.cairo_surface_t {
+    const result = try getIconFromTheme(self.theme, size, icon_name);
     self.putCache(icon_name, .icon_name, result);
     return result;
 }
 
 /// Get an icon as a surface.
-pub fn getFromAppId(self: *IconManager, app_id: [:0]const u8) !?*c.cairo_surface_t {
+pub fn getFromAppId(self: *IconManager, size: i32, app_id: [:0]const u8) !?*c.cairo_surface_t {
     if (self.cache.get(.{ .string = app_id, .kind = .app_id })) |cached| {
         if (cached) |surface| {
             _ = c.cairo_surface_reference(surface);
@@ -222,7 +222,7 @@ pub fn getFromAppId(self: *IconManager, app_id: [:0]const u8) !?*c.cairo_surface
     };
     defer allocator.free(icon_name);
 
-    const surface = try self.getFromIconName(icon_name);
+    const surface = try self.getFromIconName(size, icon_name);
     self.putCache(app_id, .app_id, surface);
     return surface;
 }
