@@ -59,7 +59,7 @@ inline fn client(self: *StatusCommand) *Client {
 pub fn createSource(self: *StatusCommand) !*c.GSource {
     // spawn the process
     self.process = std.ChildProcess.init(&.{
-        "/bin/sh", "-c", self.client().config.statusCommand(),
+        "/bin/sh", "-c", self.client().config.status_command,
     }, allocator);
     self.process.?.stdout_behavior = .Pipe;
     try self.process.?.spawn();

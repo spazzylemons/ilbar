@@ -1,6 +1,5 @@
 {
-    "font": "FreeSans",
-    "font_size": 11,
+    "font": "FreeSans 11px",
     "height": 28,
     "margin": 3,
     "width": 160,

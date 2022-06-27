@@ -98,11 +98,12 @@ pub fn main() u8 {
         }
     }
 
-    const config = readConfigFile(config_path) catch |err| blk: {
+    var config = readConfigFile(config_path) catch |err| blk: {
         std.log.err("error reading config file: {}", .{err});
-        break :blk Config{};
+        break :blk Config.defaults();
     };
     defer config.deinit();
+    config.font_height = config.fontHeight();
 
     const client = Client.init(display, &config) catch |err| {
         std.log.err("failed to create client: {}", .{err});

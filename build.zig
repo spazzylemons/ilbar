@@ -153,12 +153,15 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe.linkLibC();
     exe.addIncludePath("build");
+    exe.addIncludePath("cj");
+    exe.addCSourceFile("cj/cj.c", &.{});
     exe.defineCMacro("_POSIX_C_SOURCE", "200809L");
     exe.defineCMacro("LOG_USE_COLOR", null);
 
     pkgConfig(b, exe, "wayland-client");
     pkgConfig(b, exe, "cairo");
     pkgConfig(b, exe, "gtk+-3.0");
+    pkgConfig(b, exe, "pangocairo");
 
     std.fs.cwd().makeDir("build") catch |err| switch (err) {
         error.PathAlreadyExists => {},

@@ -48,8 +48,6 @@ toplevel_list: Toplevel.List = .{},
 pointer_manager: PointerManager = .{},
 /// The GUI tree.
 gui: ?*Element = null,
-/// The calculated height of the font from the config.
-font_height: f64,
 /// The icon manager.
 icons: IconManager,
 /// The taskbar SNI watcher.
@@ -237,7 +235,6 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
         .seat = seat,
         .wl_surface = wl_surface,
         .layer_surface = layer_surface,
-        .font_height = config.fontHeight(),
         .icons = icons,
     };
 
@@ -365,9 +362,9 @@ fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *
     errdefer allocator.free(shortcut_text);
     const text = try Element.Text.init(button.element(), shortcut_text);
     text.element().x = text_x;
-    text.element().y = @floatToInt(i32, (@intToFloat(f64, button.element().height) - self.font_height) / 2);
+    text.element().y = @divTrunc((button.element().height - self.config.font_height), 2);
     text.element().width = text_width;
-    text.element().height = @floatToInt(i32, self.font_height);
+    text.element().height = self.config.font_height;
 
     return button.element();
 }
@@ -400,9 +397,9 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
         errdefer allocator.free(title_text);
         const text = try Element.Text.init(button.element(), title_text);
         text.element().x = text_x;
-        text.element().y = @floatToInt(i32, (@intToFloat(f64, button.element().height) - self.font_height) / 2);
+        text.element().y = @divTrunc((button.element().height - self.config.font_height), 2);
         text.element().width = text_width;
-        text.element().height = @floatToInt(i32, self.font_height);
+        text.element().height = self.config.font_height;
     }
     return button.element();
 }
@@ -452,7 +449,7 @@ fn createGui(self: *Client) !*Element {
     x -= status_command_width;
     const status_command = try Element.Text.init(&root.element, status_command_text);
     status_command.element().x = x;
-    status_command.element().y = 4 + @floatToInt(i32, (@intToFloat(f64, self.config.height - 6) - self.font_height) / 2);
+    status_command.element().y = @divTrunc(self.config.height - self.config.font_height + 2, 2);
     status_command.element().width = status_command_width;
 
     return &root.element;

@@ -1,6 +1,7 @@
 const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
 const Client = @import("Client.zig");
+const Config = @import("Config.zig");
 const std = @import("std");
 
 const Element = @This();
@@ -8,7 +9,7 @@ const Element = @This();
 const Class = struct {
     destroy: fn (self: *Element) void,
     release: ?fn (self: *Element) void,
-    render: ?fn (self: *Element, cr: *c.cairo_t) void,
+    render: ?fn (self: *Element, cr: *c.cairo_t, config: *const Config) void,
 };
 
 fn makeClass(comptime T: type) Class {
@@ -29,7 +30,9 @@ pub const Root = struct {
             allocator.destroy(self);
         }
 
-        pub fn render(self: *Element, cr: *c.cairo_t) void {
+        pub fn render(self: *Element, cr: *c.cairo_t, config: *const Config) void {
+            _ = config;
+
             c.cairo_set_source_rgb(cr, 0.75, 0.75, 0.75);
             c.cairo_rectangle(cr, 0, 0, @intToFloat(f64, self.width), @intToFloat(f64, self.height));
             c.cairo_fill(cr);
@@ -50,7 +53,9 @@ pub const Root = struct {
     }
 };
 
-fn renderButton(self: *Element, cr: *c.cairo_t) void {
+fn renderButton(self: *Element, cr: *c.cairo_t, config: *const Config) void {
+    _ = config;
+
     const left: f64 = 0.5;
     const right = left + @intToFloat(f64, self.width) - 1;
     const top: f64 = 0.5;
@@ -198,20 +203,20 @@ pub const Text = struct {
             allocator.destroy(text);
         }
 
-        pub fn render(self: *Element, cr: *c.cairo_t) void {
-            const text = unwrap(self).text.ptr;
+        pub fn render(self: *Element, cr: *c.cairo_t, config: *const Config) void {
+            const layout = c.pango_cairo_create_layout(cr).?;
+            defer c.g_object_unref(layout);
+            c.pango_layout_set_font_description(layout, config.font);
+
+            const text = unwrap(self).text;
             c.cairo_set_source_rgb(cr, 0, 0, 0);
 
-            var fe: c.cairo_font_extents_t = undefined;
-            c.cairo_font_extents(cr, &fe);
-            var te: c.cairo_text_extents_t = undefined;
-            c.cairo_text_extents(cr, text, &te);
+            c.pango_layout_set_text(layout, text.ptr, std.math.cast(c.gint, text.len) orelse -1);
+            c.pango_layout_set_width(layout, self.width * c.PANGO_SCALE);
+            c.pango_layout_set_height(layout, self.height * c.PANGO_SCALE);
+            c.pango_layout_set_ellipsize(layout, c.PANGO_ELLIPSIZE_END);
 
-            c.cairo_rectangle(cr, 0, 0, @intToFloat(f64, self.width), fe.height);
-            c.cairo_clip(cr);
-
-            c.cairo_translate(cr, 0, fe.ascent);
-            c.cairo_show_text(cr, text);
+            c.pango_cairo_show_layout(cr, layout);
         }
     });
 
@@ -243,7 +248,8 @@ pub const Image = struct {
             allocator.destroy(image);
         }
 
-        pub fn render(self: *Element, cr: *c.cairo_t) void {
+        pub fn render(self: *Element, cr: *c.cairo_t, config: *const Config) void {
+            _ = config;
             const surface = unwrap(self).surface;
             const width = c.cairo_image_surface_get_width(surface);
             const height = c.cairo_image_surface_get_height(surface);
@@ -361,10 +367,10 @@ pub fn release(self: *Element) bool {
     return false;
 }
 
-pub fn renderChild(self: *Element, cr: *c.cairo_t) void {
+pub fn renderChild(self: *Element, cr: *c.cairo_t, config: *const Config) void {
     if (self.class.render) |f| {
         c.cairo_save(cr);
-        f(self, cr);
+        f(self, cr, config);
         c.cairo_restore(cr);
     }
 
@@ -372,7 +378,7 @@ pub fn renderChild(self: *Element, cr: *c.cairo_t) void {
     while (it) |node| {
         c.cairo_save(cr);
         c.cairo_translate(cr, @intToFloat(f64, node.data.x), @intToFloat(f64, node.data.y));
-        node.data.renderChild(cr);
+        node.data.renderChild(cr, config);
         c.cairo_restore(cr);
         it = node.next;
     }
@@ -390,15 +396,8 @@ pub fn render(self: *Element, client: *Client) void {
     const cr = c.cairo_create(surface).?;
     defer c.cairo_destroy(cr);
 
-    c.cairo_select_font_face(
-        cr,
-        client.config.fontName(),
-        c.CAIRO_FONT_SLANT_NORMAL,
-        c.CAIRO_FONT_WEIGHT_NORMAL,
-    );
-    c.cairo_set_font_size(cr, @intToFloat(f64, client.config.font_size));
     c.cairo_set_antialias(cr, c.CAIRO_ANTIALIAS_NONE);
     c.cairo_set_line_width(cr, 1);
 
-    self.renderChild(cr);
+    self.renderChild(cr, client.config);
 }
