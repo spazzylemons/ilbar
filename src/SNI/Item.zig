@@ -4,6 +4,7 @@ const Client = @import("../Client.zig");
 const g = @import("g_util.zig");
 const IconManager = @import("../IconManager.zig");
 const std = @import("std");
+const util = @import("../util.zig");
 
 const Item = @This();
 
@@ -75,7 +76,7 @@ fn onNewProxy(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) ca
     var err: ?*c.GError = null;
     const item = c.org_kde_status_notifier_item_proxy_new_for_bus_finish(res, &err);
     if (err) |e| {
-        std.log.warn("failed to acquire a StatusNotifierItem: {s}", .{e.message});
+        util.warn(@src(), "failed to acquire a StatusNotifierItem: {s}", .{e.message});
         c.g_error_free(e);
         return;
     }
@@ -90,7 +91,7 @@ fn onNewProxy(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) ca
     );
 
     self.updateIcon() catch |e| {
-        std.log.warn("failed to load icon: {}", .{e});
+        util.warn(@src(), "failed to load icon: {}", .{e});
     };
 }
 
@@ -183,7 +184,7 @@ const ItemAndName = struct {
 
 fn updateProperty(self: *Item, name: [:0]const u8) void {
     const data = allocator.create(ItemAndName) catch {
-        std.log.warn("failed to allocate to update property {s}", .{name});
+        util.warn(@src(), "failed to allocate to update property {s}", .{name});
         return;
     };
     data.item = self;
@@ -211,7 +212,7 @@ fn onPropertyGet(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer)
     var err: ?*c.GError = null;
     const variant = c.g_dbus_proxy_call_finish(proxy, res, &err);
     if (err) |e| {
-        std.log.warn("failed to get the property: {s}", .{e.message});
+        util.warn(@src(), "failed to get the property: {s}", .{e.message});
         c.g_error_free(e);
         return;
     }
@@ -227,7 +228,7 @@ fn onPropertyGet(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer)
     if (data.item.pending_propertes == 0 and data.item.pending_icon_change) {
         data.item.pending_icon_change = false;
         data.item.updateIcon() catch |e| {
-            std.log.warn("failed to update icon: {}", .{e});
+            util.warn(@src(), "failed to update icon: {}", .{e});
         };
     }
 }

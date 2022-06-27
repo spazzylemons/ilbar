@@ -4,6 +4,7 @@ const Client = @import("../Client.zig");
 const g = @import("g_util.zig");
 const Item = @import("Item.zig");
 const std = @import("std");
+const util = @import("../util.zig");
 
 const Host = @This();
 
@@ -95,7 +96,7 @@ fn onNewProxy(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) ca
     var err: ?*c.GError = null;
     const watcher = c.org_kde_status_notifier_watcher_proxy_new_finish(res, &err);
     if (err) |e| {
-        std.log.warn("failed to create a new StatusNotifierWatcher: {s}", .{e.message});
+        util.warn(@src(), "failed to create a new StatusNotifierWatcher: {s}", .{e.message});
         c.g_error_free(e);
         return;
     }
@@ -125,7 +126,7 @@ fn onRegisterHost(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer
         &err,
     );
     if (err) |e| {
-        std.log.warn("failed to register host: {s}", .{e.message});
+        util.warn(@src(), "failed to register host: {s}", .{e.message});
         c.g_error_free(e);
         return;
     }
@@ -136,7 +137,7 @@ fn onRegisterHost(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer
     var items = c.org_kde_status_notifier_watcher_get_registered_status_notifier_items(self.watcher) orelse return;
     while (items[0]) |item| {
         self.addItem(item) catch {
-            std.log.warn("failed to add item {s} on initialization", .{item});
+            util.warn(@src(), "failed to add item {s} on initialization", .{item});
         };
         items += 1;
     }
@@ -164,7 +165,7 @@ fn onNameVanished(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.
 fn onItemRegistered(watcher: *c.OrgKdeStatusNotifierWatcher, service: [*:0]const u8, self: *Host) callconv(.C) void {
     _ = watcher;
     self.addItem(service) catch {
-        std.log.warn("failed to add new item {s}", .{service});
+        util.warn(@src(), "failed to add new item {s}", .{service});
     };
     self.client().updateGui();
 }
@@ -175,7 +176,6 @@ fn onItemUnregistered(watcher: *c.OrgKdeStatusNotifierWatcher, service: [*:0]con
         node.data.deinit();
         self.items.remove(node);
         allocator.destroy(node);
-        std.log.info("removed item {s}", .{service});
         self.client().updateGui();
     }
 }
@@ -194,7 +194,7 @@ fn findItem(self: *Host, service: [*:0]const u8) ?*std.TailQueue(Item).Node {
 
 fn addItem(self: *Host, service: [*:0]const u8) !void {
     if (self.findItem(service) != null) {
-        std.log.warn("duplicate item", .{});
+        util.warn(@src(), "duplicate item", .{});
         return;
     }
 

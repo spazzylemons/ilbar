@@ -1,7 +1,8 @@
 const allocator = @import("../main.zig").allocator;
 const c = @import("../c.zig");
-const std = @import("std");
 const g = @import("g_util.zig");
+const std = @import("std");
+const util = @import("../util.zig");
 
 const Watcher = @This();
 
@@ -31,7 +32,7 @@ const WatchedObject = struct {
             .item => {
                 self.watcher.items.remove(node);
                 self.watcher.updateRegisteredItems() catch {
-                    std.log.warn("failed to allocate to update RegisteredStatusNotifierItems", .{});
+                    util.warn(@src(), "failed to allocate to update RegisteredStatusNotifierItems", .{});
                 };
                 c.org_kde_status_notifier_watcher_emit_status_notifier_item_unregistered(self.watcher.watcher, self.full.ptr);
                 allocator.free(self.full);
@@ -142,7 +143,7 @@ fn onBusAcquired(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.g
         &err,
     );
     if (err) |e| {
-        std.log.warn("failed to export StatusNotifierWatcher: {s}", .{e.message});
+        util.warn(@src(), "failed to export StatusNotifierWatcher: {s}", .{e.message});
         c.g_error_free(e);
         return;
     }
@@ -198,7 +199,7 @@ fn onRegisterHost(
     }
 
     _ = self.newObject(&self.hosts, .host, name_path.name, name_path.path) catch {
-        std.log.warn("failed to allocate for a StatusNotifierHost", .{});
+        util.warn(@src(), "failed to allocate for a StatusNotifierHost", .{});
         return 1;
     };
 
@@ -223,12 +224,12 @@ fn onRegisterItem(
     }
 
     const item = self.newObject(&self.items, .item, name_path.name, name_path.path) catch {
-        std.log.warn("failed to allocate for a StatusNotifierItem", .{});
+        util.warn(@src(), "failed to allocate for a StatusNotifierItem", .{});
         return 1;
     };
 
     self.updateRegisteredItems() catch {
-        std.log.warn("failed to allocate to update RegisteredStatusNotifierItems", .{});
+        util.warn(@src(), "failed to allocate to update RegisteredStatusNotifierItems", .{});
         return 1;
     };
 

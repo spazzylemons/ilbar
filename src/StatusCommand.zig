@@ -2,6 +2,7 @@ const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
 const Client = @import("Client.zig");
 const std = @import("std");
+const util = @import("util.zig");
 
 const StatusCommand = @This();
 
@@ -33,7 +34,7 @@ const CommandSource = struct {
         const self = @fieldParentPtr(CommandSource, "source", source.?);
         if ((self.pfd.revents & c.G_IO_IN) != 0) {
             self.status_command.update() catch |err| {
-                std.log.warn("failed to update status command: {}", .{err});
+                util.warn(@src(), "failed to update status command: {}", .{err});
             };
         } else if ((self.pfd.revents & (c.G_IO_ERR | c.G_IO_HUP)) != 0) {
             return 0;
@@ -82,7 +83,7 @@ pub fn createSource(self: *StatusCommand) !*c.GSource {
 pub fn deinit(self: *StatusCommand) void {
     if (self.process_running) {
         _ = self.process.?.kill() catch |err| {
-            std.log.warn("falied to kill status command: {}", .{err});
+            util.warn(@src(), "falied to kill status command: {}", .{err});
         };
     }
     self.status_buffer.deinit(allocator);

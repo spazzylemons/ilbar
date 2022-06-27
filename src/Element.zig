@@ -3,6 +3,7 @@ const c = @import("c.zig");
 const Client = @import("Client.zig");
 const Config = @import("Config.zig");
 const std = @import("std");
+const util = @import("util.zig");
 
 const Element = @This();
 
@@ -144,26 +145,26 @@ pub const ShortcutButton = struct {
             const shortcut_button = unwrap(self);
 
             const child = std.os.fork() catch |err| {
-                std.log.warn("shortcut: fork failed: {}", .{err});
+                util.warn(@src(), "shortcut: fork failed: {}", .{err});
                 return;
             };
 
             if (child == 0) {
                 // make us a session leader so we don't terminate if the taskbar closes
                 if (setsid() < 0) {
-                    std.log.warn("shortcut: setsid failed", .{});
+                    util.warn(@src(), "shortcut: setsid failed", .{});
                     std.os.exit(1);
                 }
 
                 const grandchild = std.os.fork() catch |err| {
-                    std.log.warn("shortcut: fork failed: {}", .{err});
+                    util.warn(@src(), "shortcut: fork failed: {}", .{err});
                     std.os.exit(1);
                 };
 
                 if (grandchild == 0) {
                     const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", shortcut_button.command, null };
                     const err = std.os.execveZ("/bin/sh", &argv, std.c.environ);
-                    std.log.warn("shortcut: execv failed: {}", .{err});
+                    util.warn(@src(), "shortcut: execv failed: {}", .{err});
                 }
 
                 std.os.exit(0);

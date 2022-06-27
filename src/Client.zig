@@ -118,7 +118,7 @@ const registry_listener = util.createListener(c.wl_registry_listener, struct {
                 if (version >= spec.version) {
                     spec.value = c.wl_registry_bind(registry, name, spec.interface, spec.version);
                 } else {
-                    std.log.err("interface {s} is available, but too old", .{interface_name});
+                    util.err(@src(), "interface {s} is available, but too old", .{interface_name});
                 }
                 return;
             }
@@ -131,18 +131,18 @@ fn initInterfaces(display: *c.wl_display) !InterfaceList {
     errdefer specs.deinit();
 
     const registry = c.wl_display_get_registry(display) orelse
-        return util.waylandError();
+        return util.waylandError(@src());
     defer c.wl_registry_destroy(registry);
 
     _ = c.wl_registry_add_listener(registry, &registry_listener, &specs);
     if (c.wl_display_roundtrip(display) < 0) {
-        return util.waylandError();
+        return util.waylandError(@src());
     }
 
     var bad_interfaces = false;
     for (specs.specs) |spec| {
         if (spec.value == null) {
-            std.log.err("interface {s} is unavailable or not new enough", .{spec.interface.name});
+            util.err(@src(), "interface {s} is unavailable or not new enough", .{spec.interface.name});
             bad_interfaces = true;
         }
     }
@@ -159,7 +159,7 @@ const surface_listener = util.createListener(c.zwlr_layer_surface_v1_listener, s
         c.zwlr_layer_surface_v1_ack_configure(surface, serial);
         if (width * height != client.width * client.height) {
             const new_buffer = Buffer.init(width, height) catch |err| {
-                std.log.err("failed to allocate pixel buffer: {}", .{err});
+                util.err(@src(), "failed to allocate pixel buffer: {}", .{err});
                 return;
             };
             if (client.buffer) |old_buffer| old_buffer.deinit();
@@ -172,7 +172,7 @@ const surface_listener = util.createListener(c.zwlr_layer_surface_v1_listener, s
 
     pub fn closed(client: *Client, surface: ?*c.zwlr_layer_surface_v1) void {
         if (surface == client.layer_surface) {
-            std.log.info("surface was closed, shutting down", .{});
+            util.info(@src(), "surface was closed, shutting down", .{});
             client.should_close = true;
         }
     }
@@ -180,7 +180,7 @@ const surface_listener = util.createListener(c.zwlr_layer_surface_v1_listener, s
 
 pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     const display = c.wl_display_connect(display_name) orelse
-        return util.waylandError();
+        return util.waylandError(@src());
     errdefer c.wl_display_disconnect(display);
 
     const specs = try initInterfaces(display);
@@ -197,7 +197,7 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     errdefer c.zwlr_foreign_toplevel_manager_v1_destroy(toplevel_manager);
 
     const wl_surface = c.wl_compositor_create_surface(compositor) orelse
-        return util.waylandError();
+        return util.waylandError(@src());
     errdefer c.wl_surface_destroy(wl_surface);
 
     const layer_surface = c.zwlr_layer_shell_v1_get_layer_surface(
@@ -206,7 +206,7 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
         null,
         c.ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
         "ilbar",
-    ) orelse return util.waylandError();
+    ) orelse return util.waylandError(@src());
     errdefer c.zwlr_layer_surface_v1_destroy(layer_surface);
 
     c.zwlr_layer_surface_v1_set_anchor(
@@ -457,7 +457,7 @@ fn createGui(self: *Client) !*Element {
 
 pub fn updateGui(self: *Client) void {
     const new_gui = self.createGui() catch |err| {
-        std.log.err("failed to create new GUI: {}", .{err});
+        util.err(@src(), "failed to create new GUI: {}", .{err});
         return;
     };
     if (self.gui) |gui| gui.deinit();
@@ -499,7 +499,7 @@ const buffer_listener = util.createListener(c.wl_buffer_listener, struct {
         if (buffer == client.pool_buffer) {
             c.wl_buffer_destroy(buffer);
             client.pool_buffer = client.refreshPoolBuffer() catch |err| {
-                std.log.err("failed to refresh pool buffer: {}", .{err});
+                util.err(@src(), "failed to refresh pool buffer: {}", .{err});
                 client.pool_buffer = null;
                 return;
             };
@@ -510,14 +510,14 @@ const buffer_listener = util.createListener(c.wl_buffer_listener, struct {
 fn refreshPoolBuffer(self: *Client) !*c.wl_buffer {
     const size = self.width * self.height * 4;
     const pool = c.wl_shm_create_pool(self.shm, self.buffer.?.file.handle, size) orelse
-        return util.waylandError();
+        return util.waylandError(@src());
     defer c.wl_shm_pool_destroy(pool);
     const format: u32 = switch (@import("builtin").target.cpu.arch.endian()) {
         .Big => c.WL_SHM_FORMAT_BGRX8888,
         .Little => c.WL_SHM_FORMAT_XRGB8888,
     };
     const pool_buffer = c.wl_shm_pool_create_buffer(pool, 0, self.width, self.height, self.width * 4, format) orelse
-        return util.waylandError();
+        return util.waylandError(@src());
     _ = c.wl_buffer_add_listener(pool_buffer, &buffer_listener, self);
     return pool_buffer;
 }
@@ -526,7 +526,7 @@ fn rerender(self: *Client) void {
     if (self.buffer != null and self.gui != null) {
         if (self.pool_buffer == null) {
             self.pool_buffer = self.refreshPoolBuffer() catch |err| {
-                std.log.err("failed to create pool buffer: {}", .{err});
+                util.err(@src(), "failed to create pool buffer: {}", .{err});
                 return;
             };
         }

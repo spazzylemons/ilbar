@@ -150,13 +150,13 @@ pub fn build(b: *std.build.Builder) !void {
     const exe = b.addExecutable("ilbar", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.single_threaded = true;
 
     exe.linkLibC();
     exe.addIncludePath("build");
     exe.addIncludePath("cj");
     exe.addCSourceFile("cj/cj.c", &.{});
     exe.defineCMacro("_POSIX_C_SOURCE", "200809L");
-    exe.defineCMacro("LOG_USE_COLOR", null);
 
     pkgConfig(b, exe, "wayland-client");
     pkgConfig(b, exe, "cairo");

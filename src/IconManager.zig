@@ -157,8 +157,12 @@ fn putCache(
 
 pub fn getIconFromTheme(theme: *c.GtkIconTheme, icon_name: [:0]const u8) !*c.cairo_surface_t {
     var err: ?*c.GError = null;
-    const pixbuf = c.gtk_icon_theme_load_icon(theme, icon_name, 16, 0, &err) orelse
-        return util.gtkError(err.?);
+    const pixbuf = c.gtk_icon_theme_load_icon(theme, icon_name, 16, 0, &err);
+    if (err) |e| {
+        util.warn(@src(), "failed to load icon: {s}", .{e.message});
+        c.g_error_free(e);
+        return error.GtkError;
+    }
     errdefer c.g_object_unref(pixbuf);
 
     if (c.gdk_pixbuf_get_colorspace(pixbuf) != c.GDK_COLORSPACE_RGB) {

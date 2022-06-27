@@ -1,6 +1,7 @@
 const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
 const std = @import("std");
+const util = @import("util.zig");
 
 const Config = @This();
 
@@ -69,7 +70,7 @@ fn getString(obj: c.CJObject, name: []const u8, nullable: bool) !?[:0]const u8 {
             if (nullable and member.value.type == c.CJ_NULL) {
                 return null;
             }
-            std.log.err("{s} must be a string", .{name});
+            util.err(@src(), "{s} must be a string", .{name});
             continue;
         }
         // copy the value and return it
@@ -87,12 +88,12 @@ fn getNumber(obj: c.CJObject, name: []const u8, min: u16) ?u16 {
         }
         // must be a number
         if (member.value.type != c.CJ_NUMBER) {
-            std.log.err("{s} must be a number", .{name});
+            util.err(@src(), "{s} must be a number", .{name});
             continue;
         }
         // must be in range
         if (member.value.as.number < @intToFloat(f64, min) or member.value.as.number > std.math.maxInt(u16)) {
-            std.log.err("{s} is out of range", .{name});
+            util.err(@src(), "{s} is out of range", .{name});
             continue;
         }
         // cast the value and return it
@@ -110,7 +111,7 @@ fn getFont(obj: c.CJObject, name: []const u8) ?*c.PangoFontDescription {
         }
         // must be a string
         if (member.value.type != c.CJ_STRING) {
-            std.log.err("{s} must be a string", .{name});
+            util.err(@src(), "{s} must be a string", .{name});
             continue;
         }
         // load the font and return
@@ -128,7 +129,7 @@ fn getShortcuts(obj: c.CJObject, name: []const u8) !?[]Shortcut {
         }
         // must be an array
         if (member.value.type != c.CJ_ARRAY) {
-            std.log.err("{s} must be an array", .{name});
+            util.err(@src(), "{s} must be an array", .{name});
             continue;
         }
         // load the font and return
@@ -148,7 +149,7 @@ fn getShortcuts(obj: c.CJObject, name: []const u8) !?[]Shortcut {
 
 fn parseRootConfig(self: *Config, value: c.CJValue) !void {
     if (value.type != c.CJ_OBJECT) {
-        std.log.err("config must be an object", .{});
+        util.err(@src(), "config must be an object", .{});
         return;
     }
 
@@ -180,18 +181,18 @@ fn parseRootConfig(self: *Config, value: c.CJValue) !void {
 
 fn parseShortcutConfig(value: c.CJValue) !Shortcut {
     if (value.type != c.CJ_OBJECT) {
-        std.log.err("shortcut must be an object", .{});
+        util.err(@src(), "shortcut must be an object", .{});
         return error.InvalidShortcut;
     }
 
     const text = (try getString(value.as.object, "text", false)) orelse {
-        std.log.err("shortcut text is required", .{});
+        util.err(@src(), "shortcut text is required", .{});
         return error.InvalidShortcut;
     };
     errdefer allocator.free(text);
 
     const command = (try getString(value.as.object, "command", false)) orelse {
-        std.log.err("shortcut command is required", .{});
+        util.err(@src(), "shortcut command is required", .{});
         return error.InvalidShortcut;
     };
     errdefer allocator.free(command);

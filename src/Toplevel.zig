@@ -25,11 +25,11 @@ const handle_listener = util.createListener(c.zwlr_foreign_toplevel_handle_v1_li
     ) void {
         if (handle == null or new_title == null) return;
         const toplevel = list.findOrAdd(handle.?) catch {
-            std.log.warn("failed to allocate for toplevel", .{});
+            util.warn(@src(), "failed to allocate for toplevel", .{});
             return;
         };
         const copy = allocator.dupeZ(u8, std.mem.span(new_title.?)) catch {
-            std.log.warn("failed to allocate new title", .{});
+            util.warn(@src(), "failed to allocate new title", .{});
             return;
         };
         if (toplevel.title) |old_title| allocator.free(old_title);
@@ -44,11 +44,11 @@ const handle_listener = util.createListener(c.zwlr_foreign_toplevel_handle_v1_li
     ) void {
         if (handle == null or new_app_id == null) return;
         const toplevel = list.findOrAdd(handle.?) catch {
-            std.log.warn("failed to allocate for toplevel", .{});
+            util.warn(@src(), "failed to allocate for toplevel", .{});
             return;
         };
         const copy = allocator.dupeZ(u8, std.mem.span(new_app_id.?)) catch {
-            std.log.warn("failed to allocate new app ID", .{});
+            util.warn(@src(), "failed to allocate new app ID", .{});
             return;
         };
         if (toplevel.app_id) |old_app_id| allocator.free(old_app_id);
@@ -81,14 +81,14 @@ const toplevel_listener = util.createListener(c.zwlr_foreign_toplevel_manager_v1
 
         _ = c.zwlr_foreign_toplevel_handle_v1_add_listener(handle, &handle_listener, list);
         _ = list.add(handle.?) catch |err| {
-            std.log.warn("onTopLevel: {}", .{err});
+            util.warn(@src(), "onTopLevel: {}", .{err});
         };
     }
 
     pub fn finished(list: *List, manager: ?*c.zwlr_foreign_toplevel_manager_v1) void {
         _ = manager;
         list.clear();
-        std.log.warn("toplevel manager closed early, functionality limited", .{});
+        util.warn(@src(), "toplevel manager closed early, functionality limited", .{});
     }
 });
 

@@ -2,6 +2,7 @@ const c = @import("c.zig");
 const Client = @import("Client.zig");
 const Config = @import("Config.zig");
 const std = @import("std");
+const util = @import("util.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
@@ -19,7 +20,7 @@ fn openConfigFile(path: ?[*:0]u8) !std.fs.File {
         break :blk generated;
     };
     defer allocator.free(generated);
-    std.log.info("using config file {s}", .{config_path});
+    util.info(@src(), "using config file {s}", .{config_path});
     return try std.fs.cwd().openFile(config_path, .{});
 }
 
@@ -45,7 +46,7 @@ pub fn main() u8 {
     while (i < std.os.argv.len) : (i += 1) {
         const arg = std.os.argv[i];
         if (arg[0] != '-' or arg[1] == 0 or arg[2] != 0) {
-            std.log.err("invalid argument: {s}", .{arg});
+            util.err(@src(), "invalid argument: {s}", .{arg});
             return 1;
         }
         switch (arg[1]) {
@@ -73,7 +74,7 @@ pub fn main() u8 {
 
             'd' => {
                 if (i + 1 >= std.os.argv.len) {
-                    std.log.err("missing value for -d", .{});
+                    util.err(@src(), "missing value for -d", .{});
                     return 1;
                 }
 
@@ -83,7 +84,7 @@ pub fn main() u8 {
 
             'c' => {
                 if (i + 1 >= std.os.argv.len) {
-                    std.log.err("missing value for -c", .{});
+                    util.err(@src(), "missing value for -c", .{});
                     return 1;
                 }
 
@@ -92,26 +93,26 @@ pub fn main() u8 {
             },
 
             else => {
-                std.log.err("invalid argument: {s}", .{arg});
+                util.err(@src(), "invalid argument: {s}", .{arg});
                 return 1;
             },
         }
     }
 
     var config = readConfigFile(config_path) catch |err| blk: {
-        std.log.err("error reading config file: {}", .{err});
+        util.err(@src(), "error reading config file: {}", .{err});
         break :blk Config.defaults();
     };
     defer config.deinit();
     config.font_height = config.fontHeight();
 
     const client = Client.init(display, &config) catch |err| {
-        std.log.err("failed to create client: {}", .{err});
+        util.err(@src(), "failed to create client: {}", .{err});
         return 1;
     };
     defer client.deinit();
     client.run() catch |err| {
-        std.log.err("cient closed: {}", .{err});
+        util.err(@src(), "cient closed: {}", .{err});
         return 1;
     };
 

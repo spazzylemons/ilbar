@@ -249,13 +249,51 @@ pub fn createListener(comptime T: type, comptime F: type) T {
     return result;
 }
 
-pub fn waylandError() error{WaylandError} {
-    std.log.err("wayland error: {s}", .{strerror(@enumToInt(std.c.getErrno(-1)))});
+pub fn waylandError(loc: std.builtin.SourceLocation) error{WaylandError} {
+    err(loc, "wayland error: {s}", .{strerror(@enumToInt(std.c.getErrno(-1)))});
     return error.WaylandError;
 }
 
-pub fn gtkError(err: *c.GError) error{GtkError} {
-    std.log.err("gtk error: {s}", .{err.message});
-    c.g_error_free(err);
-    return error.GtkError;
+const labels = [_][]const u8{ "INFO  ", "WARN  ", "ERROR " };
+const colors = [_][]const u8{ "\x1b[32m", "\x1b[33m", "\x1b[31m" };
+
+const stderr = std.io.getStdErr().writer();
+
+fn printHeader(level: u8, loc: std.builtin.SourceLocation) void {
+    // print the time
+    var buffer: ["00:00:00 ".len + 1]u8 = undefined;
+    const time = c.time(null);
+    if (c.localtime(&time)) |tm| {
+        const size = c.strftime(&buffer, buffer.len, "%T ", tm);
+        stderr.writeAll(buffer[0..size]) catch {};
+    }
+    // print the log level
+    const color = stderr.context.supportsAnsiEscapeCodes();
+    if (color) stderr.writeAll(colors[level]) catch {};
+    stderr.writeAll(labels[level]) catch {};
+    if (color) stderr.writeAll("\x1b[0m") catch {};
+    // print the source location
+    stderr.print("{s}:{}: ", .{ loc.file, loc.line }) catch {};
+}
+
+fn log(level: u8, loc: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    printHeader(level, loc);
+    if (@typeInfo(@TypeOf(args)).Struct.fields.len == 0) {
+        // if the args field is empty, assume that we just want to print a string, to save on binary size
+        stderr.writeAll(fmt ++ "\n") catch {};
+    } else {
+        stderr.print(fmt ++ "\n", args) catch {};
+    }
+}
+
+pub fn info(loc: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    log(0, loc, fmt, args);
+}
+
+pub fn warn(loc: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    log(1, loc, fmt, args);
+}
+
+pub fn err(loc: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    log(2, loc, fmt, args);
 }

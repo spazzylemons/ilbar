@@ -124,7 +124,7 @@ const seat_listener = util.createListener(c.wl_seat_listener, struct {
                 manager.pointer = new;
                 _ = c.wl_pointer_add_listener(new, &pointer_listener, manager);
             } else {
-                std.log.warn("failed to obtain the pointer", .{});
+                util.warn(@src(), "failed to obtain the pointer", .{});
             }
         }
         if ((caps & c.WL_SEAT_CAPABILITY_TOUCH) != 0) {
@@ -133,7 +133,7 @@ const seat_listener = util.createListener(c.wl_seat_listener, struct {
                 manager.touch = new;
                 _ = c.wl_touch_add_listener(new, &touch_listener, manager);
             } else {
-                std.log.warn("failed to obtain the touch", .{});
+                util.warn(@src(), "failed to obtain the touch", .{});
             }
         }
     }
