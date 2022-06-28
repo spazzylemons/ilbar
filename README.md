@@ -19,7 +19,7 @@ supports these by using the `wayland-info` program from within your compositor.
 
 ## Screenshot
 
-![screenshot of ilbar running in labwc](screenshot.png)
+![screenshot of ilbar](screenshot.png)
 
 ## License
 
