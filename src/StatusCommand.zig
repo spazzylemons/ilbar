@@ -13,7 +13,9 @@ process_running: bool = false,
 
 const CommandSource = struct {
     source: c.GSource,
-    pfd: c.GPollFD,
+    // pfd: c.GPollFD,
+    cond: c.GIOCondition,
+    tag: c.gpointer,
     status_command: *StatusCommand,
 
     fn prepare(source: ?*c.GSource, timeout: ?*c.gint) callconv(.C) c.gboolean {
@@ -24,7 +26,8 @@ const CommandSource = struct {
 
     fn check(source: ?*c.GSource) callconv(.C) c.gboolean {
         const self = @fieldParentPtr(CommandSource, "source", source.?);
-        return @boolToInt(self.pfd.revents != 0);
+        self.cond = c.g_source_query_unix_fd(source, self.tag);
+        return @boolToInt(self.cond != 0);
     }
 
     fn dispatch(source: ?*c.GSource, callback: c.GSourceFunc, user_data: c.gpointer) callconv(.C) c.gboolean {
@@ -32,14 +35,13 @@ const CommandSource = struct {
         _ = user_data;
 
         const self = @fieldParentPtr(CommandSource, "source", source.?);
-        if ((self.pfd.revents & c.G_IO_IN) != 0) {
+        if ((self.cond & c.G_IO_IN) != 0) {
             self.status_command.update() catch |err| {
                 util.warn(@src(), "failed to update status command: {}", .{err});
             };
-        } else if ((self.pfd.revents & (c.G_IO_ERR | c.G_IO_HUP)) != 0) {
+        } else if ((self.cond & (c.G_IO_ERR | c.G_IO_HUP)) != 0) {
             return 0;
         }
-        self.pfd.revents = 0;
         return 1;
     }
 
@@ -72,10 +74,7 @@ pub fn createSource(self: *StatusCommand) !*c.GSource {
     const source = c.g_source_new(&CommandSource.funcs, @sizeOf(CommandSource)).?;
     const command_source = @fieldParentPtr(CommandSource, "source", source);
     command_source.status_command = self;
-    command_source.pfd.fd = self.process.?.stdout.?.handle;
-    command_source.pfd.events = c.G_IO_IN | c.G_IO_ERR | c.G_IO_HUP;
-    command_source.pfd.revents = 0;
-    _ = c.g_source_add_poll(source, &command_source.pfd);
+    command_source.tag = c.g_source_add_unix_fd(source, self.process.?.stdout.?.handle, c.G_IO_IN | c.G_IO_ERR | c.G_IO_HUP);
 
     return source;
 }

@@ -1,4 +1,4 @@
-const c = @import("../c.zig");
+const c = @import("c.zig");
 
 pub inline fn cast(comptime T: type, value: anytype, ty: c.GType) *T {
     if (@typeInfo(T) == .Opaque) {

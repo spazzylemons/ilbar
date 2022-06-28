@@ -2,6 +2,7 @@ const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
 const Client = @import("Client.zig");
 const Config = @import("Config.zig");
+const Item = @import("SNI/Item.zig");
 const std = @import("std");
 const util = @import("util.zig");
 
@@ -9,7 +10,7 @@ const Element = @This();
 
 const Class = struct {
     destroy: fn (self: *Element) void,
-    release: ?fn (self: *Element) void,
+    release: ?fn (self: *Element, event: *const c.GdkEventButton) void,
     render: ?fn (self: *Element, cr: *c.cairo_t, config: *const Config) void,
 };
 
@@ -97,13 +98,14 @@ pub const WindowButton = struct {
             allocator.destroy(unwrap(self));
         }
 
-        pub fn release(self: *Element) void {
+        pub fn release(self: *Element, event: *const c.GdkEventButton) void {
+            _ = event;
+
             const window_button = unwrap(self);
 
-            c.zwlr_foreign_toplevel_handle_v1_activate(
-                window_button.handle,
-                window_button.seat,
-            );
+            if (window_button.seat != null) {
+                c.zwlr_foreign_toplevel_handle_v1_activate(window_button.handle, window_button.seat);
+            }
         }
 
         pub const render = renderButton;
@@ -111,9 +113,9 @@ pub const WindowButton = struct {
 
     node: std.TailQueue(Element).Node,
     handle: *c.zwlr_foreign_toplevel_handle_v1,
-    seat: *c.wl_seat,
+    seat: ?*c.wl_seat,
 
-    pub fn init(parent: *Element, handle: *c.zwlr_foreign_toplevel_handle_v1, seat: *c.wl_seat) !*WindowButton {
+    pub fn init(parent: *Element, handle: *c.zwlr_foreign_toplevel_handle_v1, seat: ?*c.wl_seat) !*WindowButton {
         const self = try allocator.create(WindowButton);
         self.node = .{ .data = .{ .parent = parent, .class = &class } };
         self.handle = handle;
@@ -187,7 +189,9 @@ pub const ShortcutButton = struct {
             allocator.destroy(unwrap(self));
         }
 
-        pub fn release(self: *Element) void {
+        pub fn release(self: *Element, event: *const c.GdkEventButton) void {
+            _ = event;
+
             const shortcut_button = unwrap(self);
 
             const child = std.os.fork() catch |err| {
@@ -326,6 +330,37 @@ pub const Image = struct {
     }
 };
 
+pub const ItemClick = struct {
+    const class = makeClass(struct {
+        inline fn unwrap(self: *Element) *ItemClick {
+            return @fieldParentPtr(ItemClick, "node", self.getNode());
+        }
+
+        pub fn destroy(self: *Element) void {
+            allocator.destroy(unwrap(self));
+        }
+
+        pub fn release(self: *Element, event: *const c.GdkEventButton) void {
+            unwrap(self).item.click(event);
+        }
+    });
+
+    node: std.TailQueue(Element).Node,
+    item: *Item,
+
+    pub fn init(parent: *Element, item: *Item) !*ItemClick {
+        const self = try allocator.create(ItemClick);
+        self.node = .{ .data = .{ .parent = parent, .class = &class } };
+        self.item = item;
+        parent.children.append(&self.node);
+        return self;
+    }
+
+    pub fn element(self: *ItemClick) *Element {
+        return &self.node.data;
+    }
+};
+
 parent: ?*Element = null,
 children: std.TailQueue(Element) = .{},
 
@@ -395,11 +430,11 @@ pub fn motion(self: *Element, x: i32, y: i32) bool {
     return false;
 }
 
-pub fn release(self: *Element) bool {
+pub fn release(self: *Element, event: *const c.GdkEventButton) bool {
     if (self.pressed) {
         self.pressed = false;
         if (self.pressed_hover) {
-            self.class.release.?(self);
+            self.class.release.?(self, event);
             self.pressed_hover = false;
         }
         return true;
@@ -407,7 +442,7 @@ pub fn release(self: *Element) bool {
 
     var it = self.children.first;
     while (it) |node| {
-        if (node.data.release()) return true;
+        if (node.data.release(event)) return true;
         it = node.next;
     }
 
@@ -431,18 +466,7 @@ pub fn renderChild(self: *Element, cr: *c.cairo_t, config: *const Config) void {
     }
 }
 
-pub fn render(self: *Element, client: *Client) void {
-    const surface = c.cairo_image_surface_create_for_data(
-        client.buffer.?.memory.ptr,
-        c.CAIRO_FORMAT_ARGB32,
-        client.width,
-        client.height,
-        client.width * 4,
-    ).?;
-    defer c.cairo_surface_destroy(surface);
-    const cr = c.cairo_create(surface).?;
-    defer c.cairo_destroy(cr);
-
+pub fn render(self: *Element, client: *Client, cr: *c.cairo_t) void {
     c.cairo_set_antialias(cr, c.CAIRO_ANTIALIAS_NONE);
     c.cairo_set_line_width(cr, 1);
 

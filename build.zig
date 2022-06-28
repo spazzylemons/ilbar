@@ -156,38 +156,25 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addIncludePath("build");
     exe.addIncludePath("cj");
     exe.addCSourceFile("cj/cj.c", &.{});
+    exe.linkSystemLibrary("dbusmenu-gtk3");
+    exe.addIncludePath("/usr/include/libdbusmenu-gtk3-0.4");
+    exe.addIncludePath("/usr/include/libdbusmenu-glib-0.4");
     exe.defineCMacro("_POSIX_C_SOURCE", "200809L");
 
     pkgConfig(b, exe, "wayland-client");
-    pkgConfig(b, exe, "cairo");
     pkgConfig(b, exe, "gtk+-3.0");
-    pkgConfig(b, exe, "pangocairo");
+    pkgConfig(b, exe, "gtk-layer-shell-0");
 
     std.fs.cwd().makeDir("build") catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => |e| return e,
     };
 
-    const pkgdatadir_full = runCommand(
-        b,
-        &.{ "pkg-config", "--variable=pkgdatadir", "wayland-protocols" },
-    );
-    defer b.allocator.free(pkgdatadir_full);
-    const pkgdatadir = pkgdatadir_full[0 .. pkgdatadir_full.len - 1];
-
-    const protocol_xml = [_][]const u8{
-        b.pathJoin(&.{ pkgdatadir, "stable/xdg-shell/xdg-shell" }),
-        "lib/wlr-foreign-toplevel-management-unstable-v1",
-        "lib/wlr-layer-shell-unstable-v1",
-    };
-
-    for (protocol_xml) |protocol| {
-        const scanner = WaylandScannerStep.create(b, protocol);
-        exe.addCSourceFileSource(.{
-            .source = .{ .generated = &scanner.dst_c_file },
-            .args = &.{},
-        });
-    }
+    const scanner = WaylandScannerStep.create(b, "lib/wlr-foreign-toplevel-management-unstable-v1");
+    exe.addCSourceFileSource(.{
+        .source = .{ .generated = &scanner.dst_c_file },
+        .args = &.{},
+    });
 
     const codegen = GdbusCodegenStep.create(b, "lib/SNI");
     exe.addCSourceFileSource(.{

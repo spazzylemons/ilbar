@@ -1,6 +1,6 @@
 const allocator = @import("../main.zig").allocator;
 const c = @import("../c.zig");
-const g = @import("g_util.zig");
+const g = @import("../glib_util.zig");
 const std = @import("std");
 const util = @import("../util.zig");
 

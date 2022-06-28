@@ -60,11 +60,6 @@ const handle_listener = util.createListener(c.zwlr_foreign_toplevel_handle_v1_li
         list: *List,
         handle: ?*c.zwlr_foreign_toplevel_handle_v1,
     ) void {
-        if (list.client().gui) |gui| {
-            gui.deinit();
-            list.client().gui = null;
-        }
-
         if (list.find(handle.?)) |toplevel| {
             list.remove(toplevel);
         } else {

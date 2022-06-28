@@ -1,7 +1,7 @@
 const allocator = @import("../main.zig").allocator;
 const c = @import("../c.zig");
 const Client = @import("../Client.zig");
-const g = @import("g_util.zig");
+const g = @import("../glib_util.zig");
 const IconManager = @import("../IconManager.zig");
 const std = @import("std");
 const util = @import("../util.zig");
@@ -18,8 +18,15 @@ cancellable: *c.GCancellable,
 item: ?*c.OrgKdeStatusNotifierItem,
 surface: ?*c.cairo_surface_t,
 
-pending_propertes: usize,
 pending_icon_change: bool,
+
+icon_name: ?[*:0]u8,
+icon_pixmap: ?*c.GVariant,
+icon_theme_path: ?[*:0]u8,
+item_is_menu: bool,
+menu_path: ?[*:0]u8,
+
+menu: ?*c.GtkMenu,
 
 pub fn init(self: *Item, client: *Client, service: [*:0]const u8) !void {
     self.client = client;
@@ -43,8 +50,13 @@ pub fn init(self: *Item, client: *Client, service: [*:0]const u8) !void {
     self.cancellable = c.g_cancellable_new();
     self.item = null;
     self.surface = null;
-    self.pending_propertes = 0;
-    self.pending_icon_change = false;
+    self.pending_icon_change = true;
+    self.icon_name = null;
+    self.icon_pixmap = null;
+    self.icon_theme_path = null;
+    self.item_is_menu = true;
+    self.menu_path = null;
+    self.menu = null;
 
     c.org_kde_status_notifier_item_proxy_new_for_bus(
         c.G_BUS_TYPE_SESSION,
@@ -58,6 +70,21 @@ pub fn init(self: *Item, client: *Client, service: [*:0]const u8) !void {
 }
 
 pub fn deinit(self: *Item) void {
+    if (self.icon_name) |icon_name| {
+        c.g_free(icon_name);
+    }
+    if (self.icon_pixmap) |icon_pixmap| {
+        c.g_variant_unref(icon_pixmap);
+    }
+    if (self.icon_theme_path) |icon_theme_path| {
+        c.g_free(icon_theme_path);
+    }
+    if (self.menu_path) |menu_path| {
+        c.g_free(menu_path);
+    }
+    if (self.menu) |menu| {
+        c.g_object_unref(menu);
+    }
     if (self.surface) |surface| {
         c.cairo_surface_destroy(surface);
     }
@@ -90,17 +117,14 @@ fn onNewProxy(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) ca
         self,
     );
 
-    self.updateIcon() catch |e| {
-        util.warn(@src(), "failed to load icon: {}", .{e});
-    };
+    self.updateProperties();
 }
 
 fn getIconFromIconName(self: *Item) !?*c.cairo_surface_t {
     // get the icon name, if it exists
-    const icon_name = c.org_kde_status_notifier_item_get_icon_name(self.item) orelse
-        return null;
+    const icon_name = self.icon_name orelse return null;
     // if the item uses a custom path, search the theme for the icon there
-    if (c.org_kde_status_notifier_item_get_icon_theme_path(self.item)) |icon_theme_path| {
+    if (self.icon_theme_path) |icon_theme_path| {
         const theme = c.gtk_icon_theme_new().?;
         defer c.g_object_unref(theme);
         c.gtk_icon_theme_append_search_path(theme, icon_theme_path);
@@ -111,8 +135,7 @@ fn getIconFromIconName(self: *Item) !?*c.cairo_surface_t {
 }
 
 fn getIconFromPixmap(self: *Item) !?*c.cairo_surface_t {
-    const variant = c.org_kde_status_notifier_item_get_icon_pixmap(self.item) orelse
-        return null;
+    const variant = self.icon_pixmap orelse return null;
     var it: ?*c.GVariantIter = undefined;
     c.g_variant_get(variant, "a(iiay)", &it);
     defer c.g_variant_iter_free(it);
@@ -173,61 +196,134 @@ fn updateIcon(self: *Item) !void {
 fn onNewIcon(item: *c.OrgKdeStatusNotifierItem, self: *Item) callconv(.C) void {
     _ = item;
     self.pending_icon_change = true;
-    self.updateProperty("IconName");
-    self.updateProperty("IconPixmap");
+    self.updateProperties();
 }
 
-const ItemAndName = struct {
-    item: *Item,
-    name: [*:0]const u8,
-};
-
-fn updateProperty(self: *Item, name: [:0]const u8) void {
-    const data = allocator.create(ItemAndName) catch {
-        util.warn(@src(), "failed to allocate to update property {s}", .{name});
+fn updateMenu(self: *Item) void {
+    const name = allocator.dupeZ(u8, self.name) catch {
+        util.warn(@src(), "failed to allocate to update menu", .{});
         return;
     };
-    data.item = self;
-    data.name = name;
+    defer allocator.free(name);
 
-    self.pending_propertes += 1;
+    if (self.menu == null and self.menu_path != null) {
+        const dbus_menu = c.dbusmenu_gtkmenu_new(name, self.menu_path);
+        defer c.g_object_unref(dbus_menu);
+        _ = c.g_object_ref_sink(dbus_menu);
+
+        self.menu = g.cast(c.GtkMenu, dbus_menu, c.gtk_menu_get_type());
+
+        const window = g.cast(c.GtkWidget, self.client.window, c.gtk_widget_get_type());
+        c.gtk_menu_attach_to_widget(self.menu, window, null);
+    }
+}
+
+// GdkEvent cannot be parsed by zig, need to redefine the function
+extern fn gtk_menu_popup_at_pointer(menu: *c.GtkMenu, event: *const anyopaque) void;
+
+pub fn click(self: *Item, event: *const c.GdkEventButton) void {
+    if (self.item_is_menu) {
+        self.updateMenu();
+        if (self.menu) |menu| {
+            gtk_menu_popup_at_pointer(menu, event);
+        }
+    } else {
+        c.org_kde_status_notifier_item_call_activate(
+            self.item,
+            @floatToInt(i32, event.x),
+            @floatToInt(i32, event.y),
+            self.cancellable,
+            onActivateComplete,
+            self,
+        );
+    }
+}
+
+fn onActivateComplete(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) callconv(.C) void {
+    _ = src;
+    const self = @ptrCast(*Item, @alignCast(@alignOf(Item), user_data.?));
+
+    var err: ?*c.GError = null;
+    _ = c.org_kde_status_notifier_item_call_activate_finish(self.item, res, &err);
+    if (err) |e| {
+        util.warn(@src(), "failed to activate the item: {s}", .{e.message});
+        c.g_error_free(e);
+        return;
+    }
+}
+
+fn updateProperties(self: *Item) void {
     c.g_dbus_proxy_call(
         g.cast(c.GDBusProxy, self.item, c.g_dbus_proxy_get_type()),
-        "org.freedesktop.DBus.Properties.Get",
-        c.g_variant_new("(ss)", "org.kde.StatusNotifierItem", name.ptr),
+        "org.freedesktop.DBus.Properties.GetAll",
+        c.g_variant_new("(s)", "org.kde.StatusNotifierItem"),
         c.G_DBUS_CALL_FLAGS_NONE,
         -1,
         self.cancellable,
-        onPropertyGet,
-        data,
+        onPropertiesGet,
+        self,
     );
 }
 
-fn onPropertyGet(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) callconv(.C) void {
-    const data = @ptrCast(*ItemAndName, @alignCast(@alignOf(ItemAndName), user_data.?));
-    defer allocator.destroy(data);
+fn onPropertiesGet(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) callconv(.C) void {
+    const self = @ptrCast(*Item, @alignCast(@alignOf(Item), user_data.?));
+    _ = self;
 
     const proxy = g.cast(c.GDBusProxy, src, c.g_dbus_proxy_get_type());
 
     var err: ?*c.GError = null;
     const variant = c.g_dbus_proxy_call_finish(proxy, res, &err);
     if (err) |e| {
-        util.warn(@src(), "failed to get the property: {s}", .{e.message});
+        util.warn(@src(), "failed to get properties: {s}", .{e.message});
         c.g_error_free(e);
         return;
     }
     defer c.g_variant_unref(variant);
 
-    var value: ?*c.GVariant = undefined;
-    c.g_variant_get(variant, "(v)", &value);
-    defer c.g_variant_unref(value);
+    var it: ?*c.GVariantIter = undefined;
+    c.g_variant_get(variant, "(a{sv})", &it);
+    defer c.g_variant_iter_free(it);
 
-    c.g_dbus_proxy_set_cached_property(proxy, data.name, value);
+    var key: [*:0]u8 = undefined;
+    var value: *c.GVariant = undefined;
+    while (c.g_variant_iter_next(it, "{sv}", &key, &value) != 0) {
+        defer c.g_free(key);
+        defer c.g_variant_unref(value);
 
-    data.item.pending_propertes -= 1;
-    if (data.item.pending_propertes == 0 and data.item.pending_icon_change) {
-        data.item.pending_icon_change = false;
-        data.item.updateIcon() catch |e| {
+        const key_span = std.mem.span(key);
+
+        if (std.mem.eql(u8, key_span, "IconName")) {
+            if (self.icon_name) |icon_name| {
+                c.g_free(icon_name);
+            }
+            c.g_variant_get(value, "s", &self.icon_name);
+        } else if (std.mem.eql(u8, key_span, "IconPixmap")) {
+            if (self.icon_pixmap) |icon_pixmap| {
+                c.g_variant_unref(icon_pixmap);
+            }
+            self.icon_pixmap = value;
+            _ = c.g_variant_ref(value);
+        } else if (std.mem.eql(u8, key_span, "IconThemePath")) {
+            if (self.icon_theme_path) |icon_theme_path| {
+                c.g_free(icon_theme_path);
+            }
+            c.g_variant_get(value, "s", &self.icon_theme_path);
+        } else if (std.mem.eql(u8, key_span, "Menu")) {
+            if (self.menu_path) |menu_path| {
+                c.g_free(menu_path);
+            }
+            c.g_variant_get(value, "o", &self.menu_path);
+            self.updateMenu();
+        } else if (std.mem.eql(u8, key_span, "ItemIsMenu")) {
+            var item_is_menu: c.gboolean = @boolToInt(self.item_is_menu);
+            c.g_variant_get(value, "b", &item_is_menu);
+            self.item_is_menu = item_is_menu != 0;
+        }
+    }
+
+    if (self.pending_icon_change) {
+        self.pending_icon_change = false;
+        self.updateIcon() catch |e| {
             util.warn(@src(), "failed to update icon: {}", .{e});
         };
     }

@@ -34,11 +34,6 @@ fn readConfigFile(path: ?[*:0]u8) !Config {
 pub fn main() u8 {
     defer _ = gpa.deinit();
 
-    var dummy_argc: c.gint = 1;
-    var dummy_argv_value = [_:null]?[*:0]u8{std.os.argv[0]};
-    var dummy_argv: [*c][*c]u8 = &dummy_argv_value;
-    c.gdk_init(&dummy_argc, &dummy_argv);
-
     var display: ?[*:0]u8 = null;
     var config_path: ?[*:0]u8 = null;
 
