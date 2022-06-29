@@ -9,11 +9,7 @@ pub inline fn cast(comptime T: type, value: anytype, ty: c.GType) *T {
 }
 
 pub inline fn signalConnect(instance: anytype, detailed_signal: anytype, c_handler: anytype, data: anytype) c.gulong {
-    return c.g_signal_connect_data(instance, detailed_signal, c_handler, data, null, 0);
-}
-
-pub inline fn callback(value: anytype) c.GCallback {
-    return @intToPtr(c.GCallback, @ptrToInt(value));
+    return c.g_signal_connect_data(instance, detailed_signal, @intToPtr(c.GCallback, @ptrToInt(c_handler)), data, null, 0);
 }
 
 pub inline fn dbusError(invocation: *c.GDBusMethodInvocation, err: c_int, message: [*:0]const u8) void {

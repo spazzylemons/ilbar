@@ -254,7 +254,7 @@ pub fn waylandError(loc: std.builtin.SourceLocation) error{WaylandError} {
     return error.WaylandError;
 }
 
-const labels = [_][]const u8{ "INFO  ", "WARN  ", "ERROR " };
+const labels = [_][]const u8{ "[INFO]", "[WARN]", "[ERROR]" };
 const colors = [_][]const u8{ "\x1b[32m", "\x1b[33m", "\x1b[31m" };
 
 const stderr = std.io.getStdErr().writer();
@@ -273,7 +273,7 @@ fn printHeader(level: u8, loc: std.builtin.SourceLocation) void {
     stderr.writeAll(labels[level]) catch {};
     if (color) stderr.writeAll("\x1b[0m") catch {};
     // print the source location
-    stderr.print("{s}:{}: ", .{ loc.file, loc.line }) catch {};
+    stderr.print(" {s}:{}: ", .{ loc.file, loc.line }) catch {};
 }
 
 fn log(level: u8, loc: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
@@ -296,4 +296,26 @@ pub fn warn(loc: std.builtin.SourceLocation, comptime fmt: []const u8, args: any
 
 pub fn err(loc: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
     log(2, loc, fmt, args);
+}
+
+fn findMaxBufSizeZ(comptime fmt: []const u8, comptime Args: type) u64 {
+    var args: Args = undefined;
+    inline for (@typeInfo(Args).Struct.fields) |field, i| {
+        if (@typeInfo(field.field_type) != .Int) {
+            // possible to implement for other types, but not needed as of now
+            @compileError("unimplemented for type " ++ @typeName(field.field_type));
+        }
+        if (@typeInfo(field.field_type).Int.signedness == .signed) {
+            args[i] = std.math.minInt(field.field_type);
+        } else {
+            args[i] = std.math.maxInt(field.field_type);
+        }
+    }
+    return std.fmt.count(fmt, args) + 1;
+}
+
+pub fn arrayPrintZ(comptime fmt: []const u8, args: anytype) [findMaxBufSizeZ(fmt, @TypeOf(args))]u8 {
+    var result: [findMaxBufSizeZ(fmt, @TypeOf(args))]u8 = undefined;
+    _ = std.fmt.bufPrintZ(&result, fmt, args) catch unreachable;
+    return result;
 }

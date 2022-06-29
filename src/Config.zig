@@ -258,7 +258,7 @@ pub fn fontHeight(self: Config) i32 {
     return @divTrunc(ascent + descent, c.PANGO_SCALE);
 }
 
-pub fn textWidth(self: Config, text: [*:0]const u8) i32 {
+pub fn textWidth(self: Config, text: [:0]const u8) i32 {
     const context = makeContext();
     defer c.g_object_unref(context);
 
@@ -266,7 +266,7 @@ pub fn textWidth(self: Config, text: [*:0]const u8) i32 {
     defer c.g_object_unref(layout);
     c.pango_layout_set_font_description(layout, self.font);
 
-    c.pango_layout_set_text(layout, text, -1);
+    c.pango_layout_set_text(layout, text.ptr, std.math.cast(i32, text.len) orelse -1);
     var width: c.gint = undefined;
     c.pango_layout_get_pixel_size(layout, &width, null);
 

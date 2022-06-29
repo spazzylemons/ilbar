@@ -34,6 +34,12 @@ fn readConfigFile(path: ?[*:0]u8) !Config {
 pub fn main() u8 {
     defer _ = gpa.deinit();
 
+    // force Wayland backend
+    if (c.setenv("GDK_BACKEND", "wayland", 1) != 0) {
+        util.err(@src(), "failed to set GDK_BACKEND", .{});
+        return 1;
+    }
+
     var display: ?[*:0]u8 = null;
     var config_path: ?[*:0]u8 = null;
 
@@ -50,7 +56,7 @@ pub fn main() u8 {
                     \\usage: {s} [-h] [-v] [-d display] [-c config]
                     \\  -h          display this help and exit
                     \\  -v          display program information and exit
-                    \\  -d display  set Wayland display (default: $WAYLAND_DISPLAY
+                    \\  -d display  set Wayland display (default: $WAYLAND_DISPLAY)
                     \\  -c config   change config file path
                     \\
                 , .{std.os.argv[0]}) catch return 1;
@@ -58,12 +64,12 @@ pub fn main() u8 {
             },
 
             'v' => {
-                std.io.getStdOut().writeAll(
-                    \\ilbar - unversioned build
+                std.io.getStdOut().writer().print(
+                    \\ilbar - unversioned build, commit {s}
                     \\copyright (c) 2022 spazzylemons
                     \\license: MIT <https://opensource.org/licenses/MIT>
                     \\
-                ) catch return 1;
+                , .{@cImport({}).ILBAR_COMMIT_HASH}) catch return 1;
                 return 0;
             },
 
@@ -94,6 +100,17 @@ pub fn main() u8 {
         }
     }
 
+    if (display) |disp| {
+        if (c.setenv("WAYLAND_DISPLAY", disp, 1) != 0) {
+            util.err(@src(), "failed to set WAYLAND_DISPLAY", .{});
+        }
+    }
+
+    var dummy_argc: c.gint = 1;
+    var dummy_argv_value = [_:null]?[*:0]u8{std.os.argv[0]};
+    var dummy_argv: [*c][*c]u8 = &dummy_argv_value;
+    c.gtk_init(&dummy_argc, &dummy_argv);
+
     var config = readConfigFile(config_path) catch |err| blk: {
         util.err(@src(), "error reading config file: {}", .{err});
         break :blk Config.defaults();
@@ -101,7 +118,8 @@ pub fn main() u8 {
     defer config.deinit();
     config.font_height = config.fontHeight();
 
-    const client = Client.init(display, &config) catch |err| {
+    var client: Client = undefined;
+    client.init(&config) catch |err| {
         util.err(@src(), "failed to create client: {}", .{err});
         return 1;
     };

@@ -1,5 +1,3 @@
-//! The interface to Wayland.
-
 const allocator = @import("main.zig").allocator;
 const c = @import("c.zig");
 const Config = @import("Config.zig");
@@ -19,8 +17,6 @@ const Client = @This();
 config: *const Config,
 /// Seat provided by GDK
 seat: ?*c.wl_seat = null,
-/// When set to true, events stop being dispatched.
-should_close: bool = false,
 /// The current width of the surface.
 width: i32 = 0,
 /// The current height of the surface.
@@ -37,8 +33,6 @@ watcher: Watcher = .{},
 host: Host = .{},
 /// The status command handler.
 status_command: StatusCommand = .{},
-/// The GTK application.
-application: *c.GtkApplication,
 /// THe GTK window.
 window: ?*c.GtkWindow = null,
 /// If true, the mouse is down.
@@ -56,23 +50,7 @@ const registry_listener = util.createListener(c.wl_registry_listener, struct {
     }
 });
 
-extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-
-pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
-    if (display_name) |name| {
-        if (setenv("WAYLAND_DISPLAY", name, 1) != 0) return error.OutOfMemory;
-    }
-
-    var dummy_argc: c.gint = 1;
-    var dummy_argv_value = [_:null]?[*:0]u8{std.os.argv[0]};
-    var dummy_argv: [*c][*c]u8 = &dummy_argv_value;
-    if (c.gtk_init_check(&dummy_argc, &dummy_argv) == 0) {
-        return error.CannotOpenDisplay;
-    }
-
-    const application = c.gtk_application_new("spazzylemons.ilbar", c.G_APPLICATION_FLAGS_NONE).?;
-    errdefer c.g_object_unref(application);
-
+pub fn init(self: *Client, config: *const Config) !void {
     const gdk_display = c.gdk_display_get_default() orelse
         return error.NoDefaultDisplay;
 
@@ -101,13 +79,9 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     const icons = try IconManager.init();
     errdefer icons.deinit();
 
-    const self = try allocator.create(Client);
-    errdefer allocator.destroy(self);
-
     self.* = .{
         .config = config,
         .icons = icons,
-        .application = application,
     };
 
     self.findSeat(gdk_display);
@@ -116,50 +90,34 @@ pub fn init(display_name: ?[*:0]const u8, config: *const Config) !*Client {
     self.watcher.init();
     self.host.init();
 
-    _ = g.signalConnect(self.application, "activate", g.callback(onActivate), self);
-    _ = g.signalConnect(gdk_display, "seat-added", g.callback(onSeatAdded), self);
-    _ = g.signalConnect(gdk_display, "seat-removed", g.callback(onSeatRemoved), self);
-
-    return self;
+    _ = g.signalConnect(gdk_display, "seat-added", onSeatAdded, self);
+    _ = g.signalConnect(gdk_display, "seat-removed", onSeatRemoved, self);
 }
 
 pub fn deinit(self: *Client) void {
+    if (self.window) |window| c.g_object_unref(window);
     self.status_command.deinit();
     self.host.deinit();
     self.watcher.deinit();
     self.icons.deinit();
     if (self.gui) |gui| gui.deinit();
     self.toplevel_list.deinit();
-    c.g_object_unref(self.application);
-    allocator.destroy(self);
 }
 
 pub fn run(self: *Client) !void {
-    const app = g.cast(c.GApplication, self.application, c.g_application_get_type());
+    const application = c.gtk_application_new("spazzylemons.ilbar", c.G_APPLICATION_FLAGS_NONE).?;
+    defer c.g_object_unref(application);
 
-    const ctx = c.g_main_context_default();
-    if (c.g_main_context_acquire(ctx) == 0) {
-        return error.CannotAcquireContext;
-    }
-    defer c.g_main_context_release(ctx);
-
-    var err: ?*c.GError = null;
-    if (c.g_application_register(app, null, &err) == 0) {
-        util.err(@src(), "failed to register application: {s}", .{err.?.message});
-        c.g_error_free(err);
-        return error.FailedToRegister;
-    }
-
-    c.g_application_activate(app);
+    _ = g.signalConnect(application, "activate", onActivate, self);
 
     const status_source = try self.status_command.createSource();
     defer c.g_source_unref(status_source);
 
-    _ = c.g_source_attach(status_source, ctx);
+    _ = c.g_source_attach(status_source, c.g_main_context_default());
     defer c.g_source_destroy(status_source);
 
-    while (!self.should_close) {
-        _ = c.g_main_context_iteration(ctx, 1);
+    if (c.g_application_run(g.cast(c.GApplication, application, c.g_application_get_type()), 0, null) != 0) {
+        return error.ApplicationError;
     }
 }
 
@@ -196,8 +154,7 @@ fn onSeatRemoved(display: *c.GdkDisplay, seat: *c.GdkSeat, self: *Client) callco
 }
 
 fn onActivate(app: *c.GtkApplication, self: *Client) callconv(.C) void {
-    _ = app;
-    const window = c.gtk_application_window_new(self.application);
+    const window = c.gtk_application_window_new(app);
     self.window = g.cast(c.GtkWindow, window, c.gtk_window_get_type());
     c.gtk_layer_init_for_window(self.window);
     c.gtk_layer_set_layer(self.window, c.GTK_LAYER_SHELL_LAYER_BOTTOM);
@@ -208,23 +165,14 @@ fn onActivate(app: *c.GtkApplication, self: *Client) callconv(.C) void {
     c.gtk_layer_auto_exclusive_zone_enable(self.window);
     c.gtk_widget_show_all(window);
 
-    _ = g.signalConnect(self.window, "destroy", g.callback(onWindowDestroy), self);
-    _ = g.signalConnect(self.window, "draw", g.callback(onDraw), self);
-    _ = g.signalConnect(self.window, "configure-event", g.callback(onConfigure), self);
-    _ = g.signalConnect(self.window, "button-press-event", g.callback(onButtonPress), self);
-    _ = g.signalConnect(self.window, "button-release-event", g.callback(onButtonRelease), self);
-    _ = g.signalConnect(self.window, "motion-notify-event", g.callback(onMotionNotify), self);
+    _ = g.signalConnect(self.window, "draw", onDraw, self);
+    _ = g.signalConnect(self.window, "configure-event", onConfigure, self);
+    _ = g.signalConnect(self.window, "button-press-event", onButtonPress, self);
+    _ = g.signalConnect(self.window, "button-release-event", onButtonRelease, self);
+    _ = g.signalConnect(self.window, "motion-notify-event", onMotionNotify, self);
 
     const screen = c.gtk_window_get_screen(self.window);
-    _ = g.signalConnect(screen, "size-changed", g.callback(onSizeChanged), self);
-}
-
-fn onWindowDestroy(widget: *c.GtkWidget, self: *Client) callconv(.C) void {
-    _ = widget;
-
-    c.g_object_unref(self.window);
-    self.window = null;
-    self.should_close = true;
+    _ = g.signalConnect(screen, "size-changed", onSizeChanged, self);
 }
 
 fn onDraw(widget: *c.GtkWidget, cr: *c.cairo_t, self: *Client) callconv(.C) c.gboolean {
@@ -302,7 +250,7 @@ fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *
     const button = try Element.ShortcutButton.init(root, shortcut.command.ptr);
     errdefer button.element().deinit();
 
-    const text_width = self.config.textWidth(shortcut.text.ptr);
+    const text_width = self.config.textWidth(shortcut.text);
     var text_x = self.config.margin;
 
     button.element().x = x;
@@ -311,19 +259,15 @@ fn createShortcutButton(self: *Client, shortcut: *const Config.Shortcut, root: *
     button.element().height = self.config.height - 6;
 
     if (shortcut.icon) |icon_name| {
-        const image = try self.icons.getFromIconName(self.config.icon_size, icon_name);
-        defer c.cairo_surface_destroy(image);
-        const icon = try Element.Image.init(button.element(), image);
-        icon.element().x = self.config.margin;
-        icon.element().y = @divTrunc(button.element().height - self.config.icon_size, 2);
-        icon.element().width = self.config.icon_size;
-        icon.element().height = self.config.icon_size;
-        button.element().width += self.config.icon_size + self.config.margin;
-        text_x += self.config.icon_size + self.config.margin;
+        if (try self.icons.getFromIconName(self.config.icon_size, icon_name)) |surface| {
+            defer c.cairo_surface_destroy(surface);
+            const image = try Element.Image.init(button.element(), surface);
+            self.setupIcon(image.element());
+            button.element().width += self.config.icon_size + self.config.margin;
+            text_x += self.config.icon_size + self.config.margin;
+        }
     }
-    const shortcut_text = try allocator.dupeZ(u8, shortcut.text);
-    errdefer allocator.free(shortcut_text);
-    const text = try Element.Text.init(button.element(), shortcut_text);
+    const text = try Element.Text.init(button.element(), shortcut.text);
     text.element().x = text_x;
     text.element().y = @divTrunc((button.element().height - self.config.font_height), 2);
     text.element().width = text_width;
@@ -344,27 +288,30 @@ fn createTaskbarButton(self: *Client, toplevel: *Toplevel, root: *Element, x: i3
     var text_x = self.config.margin;
     var text_width = self.config.width - (2 * self.config.margin);
     if (toplevel.app_id) |app_id| {
-        if (try self.icons.getFromAppId(self.config.icon_size, app_id)) |image| {
-            defer c.cairo_surface_destroy(image);
-            const icon = try Element.Image.init(button.element(), image);
-            icon.element().x = self.config.margin;
-            icon.element().y = @divTrunc(button.element().height - self.config.icon_size, 2);
-            icon.element().width = self.config.icon_size;
-            icon.element().height = self.config.icon_size;
+        if (try self.icons.getFromAppId(self.config.icon_size, app_id)) |surface| {
+            defer c.cairo_surface_destroy(surface);
+            const image = try Element.Image.init(button.element(), surface);
+            self.setupIcon(image.element());
             text_x += self.config.icon_size + self.config.margin;
             text_width -= self.config.icon_size + self.config.margin;
         }
     }
+
     if (toplevel.title) |title| {
-        const title_text = try allocator.dupeZ(u8, title);
-        errdefer allocator.free(title_text);
-        const text = try Element.Text.init(button.element(), title_text);
+        const text = try Element.Text.init(button.element(), title);
         text.element().x = text_x;
         text.element().y = @divTrunc((button.element().height - self.config.font_height), 2);
         text.element().width = text_width;
         text.element().height = self.config.font_height;
     }
     return button.element();
+}
+
+fn setupIcon(self: *Client, element: *Element) void {
+    element.x = self.config.margin;
+    element.y = @divTrunc(element.parent.?.height - self.config.icon_size, 2);
+    element.width = self.config.icon_size;
+    element.height = self.config.icon_size;
 }
 
 fn createGui(self: *Client) !*Element {
@@ -386,11 +333,9 @@ fn createGui(self: *Client) !*Element {
         it = node.next;
     }
 
-    var command_text_owned = true;
-
-    const status_command_text = try allocator.dupeZ(u8, self.status_command.status);
-    errdefer if (command_text_owned) allocator.free(status_command_text);
-    const status_command_width = self.config.textWidth(status_command_text.ptr);
+    const status = try allocator.dupeZ(u8, self.status_command.status);
+    defer allocator.free(status);
+    const status_command_width = self.config.textWidth(status);
 
     const status_tray = try Element.StatusTray.init(&root.element);
     status_tray.element().width = status_command_width + 2 * self.config.margin + (self.config.icon_size + self.config.margin) * @intCast(i32, self.host.items.len);
@@ -398,8 +343,7 @@ fn createGui(self: *Client) !*Element {
     status_tray.element().x = self.width - self.config.margin - status_tray.element().width;
     status_tray.element().y = 4;
 
-    const status_command = try Element.Text.init(status_tray.element(), status_command_text);
-    command_text_owned = false;
+    const status_command = try Element.Text.init(status_tray.element(), status);
     status_command.element().x = self.config.margin;
     status_command.element().y = @divTrunc((status_tray.element().height - self.config.font_height), 2);
     status_command.element().width = status_command_width;
@@ -409,14 +353,12 @@ fn createGui(self: *Client) !*Element {
     var it2 = self.host.items.first;
     while (it2) |node| {
         const item = try Element.ItemClick.init(status_tray.element(), &node.data);
+        self.setupIcon(item.element());
         item.element().x = x;
-        item.element().y = @divTrunc(status_tray.element().height - self.config.icon_size, 2);
-        item.element().width = self.config.icon_size;
-        item.element().height = self.config.icon_size;
         if (node.data.surface) |surface| {
-            const icon = try Element.Image.init(item.element(), surface);
-            icon.element().width = self.config.icon_size;
-            icon.element().height = self.config.icon_size;
+            const image = try Element.Image.init(item.element(), surface);
+            image.element().width = self.config.icon_size;
+            image.element().height = self.config.icon_size;
         }
         x += self.config.icon_size + self.config.margin;
         it2 = node.next;

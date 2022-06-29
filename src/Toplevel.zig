@@ -9,7 +9,7 @@ const Toplevel = @This();
 /// The window handle.
 handle: *c.zwlr_foreign_toplevel_handle_v1,
 /// THe last seen title.
-title: ?[:0]const u8,
+title: ?[]const u8,
 /// The last seen app ID.
 app_id: ?[:0]const u8,
 
@@ -28,7 +28,7 @@ const handle_listener = util.createListener(c.zwlr_foreign_toplevel_handle_v1_li
             util.warn(@src(), "failed to allocate for toplevel", .{});
             return;
         };
-        const copy = allocator.dupeZ(u8, std.mem.span(new_title.?)) catch {
+        const copy = allocator.dupe(u8, std.mem.span(new_title.?)) catch {
             util.warn(@src(), "failed to allocate new title", .{});
             return;
         };

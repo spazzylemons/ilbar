@@ -9,6 +9,7 @@ A simple classic taskbar for Wayland desktops.
 - libdbusmenu-gtk3 0.4
 - wayland-client
 - wayland-scanner
+- gdbus-codegen
 - The latest version of Zig
 
 ## Usage requirements

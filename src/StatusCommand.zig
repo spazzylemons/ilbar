@@ -8,7 +8,7 @@ const StatusCommand = @This();
 
 status: []const u8 = &.{},
 status_buffer: std.ArrayListUnmanaged(u8) = .{},
-process: ?std.ChildProcess = null,
+stdout: ?std.fs.File = null,
 process_running: bool = false,
 
 const CommandSource = struct {
@@ -40,6 +40,12 @@ const CommandSource = struct {
                 util.warn(@src(), "failed to update status command: {}", .{err});
             };
         } else if ((self.cond & (c.G_IO_ERR | c.G_IO_HUP)) != 0) {
+            util.warn(@src(), "cannot read status command", .{});
+            // empty status command
+            allocator.free(self.status_command.status);
+            self.status_command.status = &.{};
+            self.status_command.client().updateGui();
+            // disconnect the GSource, preventing further updates
             return 0;
         }
         return 1;
@@ -58,40 +64,76 @@ const CommandSource = struct {
 inline fn client(self: *StatusCommand) *Client {
     return @fieldParentPtr(Client, "status_command", self);
 }
+
+/// Spawn the command and return the file to read from.
+fn spawnCommand(command: [*:0]const u8) !std.fs.File {
+    // create a pipe
+    const pipe = try std.os.pipe();
+    // fork the process
+    const pid = std.os.fork() catch |err| {
+        std.os.close(pipe[0]);
+        std.os.close(pipe[1]);
+        return err;
+    };
+    // are we the child process?
+    if (pid == 0) {
+        // close the read end
+        std.os.close(pipe[0]);
+        // connect the write end to stdout
+        std.os.dup2(pipe[1], std.os.STDOUT_FILENO) catch |err| {
+            util.err(@src(), "status command: dup2 failed: {}", .{err});
+            std.os.exit(1);
+        };
+        // and close the now unused write end
+        std.os.close(pipe[1]);
+        // GTK sets the SIGPIPE to SIG_IGN, which if we do not fix here, will cause a PID leak
+        const act = std.os.Sigaction{
+            .handler = .{ .sigaction = std.os.SIG.DFL },
+            .mask = std.os.empty_sigset,
+            .flags = 0,
+        };
+        std.os.sigaction(std.os.SIG.PIPE, &act, null) catch |err| {
+            util.err(@src(), "status command: sigaction failed: {}", .{err});
+            std.os.exit(1);
+        };
+        // execute the status command
+        const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", command, null };
+        const err = std.os.execveZ("/bin/sh", &argv, std.c.environ);
+        util.err(@src(), "status command: execv failed: {}", .{err});
+        std.os.exit(1);
+    }
+    // close the read end on failure
+    errdefer std.os.close(pipe[0]);
+    // close the write end
+    std.os.close(pipe[1]);
+    // add the non-blocking flag so we can read without blocking
+    const old_fl = try std.os.fcntl(pipe[0], std.os.F.GETFL, 0);
+    _ = try std.os.fcntl(pipe[0], std.os.F.SETFL, old_fl | std.os.O.NONBLOCK);
+    // return the read end of the pipe
+    return std.fs.File{ .handle = pipe[0] };
+}
+
 /// Spawn the process and return a GSource that tracks updates.
 pub fn createSource(self: *StatusCommand) !*c.GSource {
-    // spawn the process
-    self.process = std.ChildProcess.init(&.{
-        "/bin/sh", "-c", self.client().config.status_command,
-    }, allocator);
-    self.process.?.stdout_behavior = .Pipe;
-    try self.process.?.spawn();
-    self.process_running = true;
-    // add the non-blocking flag so we can read without blocking
-    const old_fl = try std.os.fcntl(self.process.?.stdout.?.handle, std.os.F.GETFL, 0);
-    _ = try std.os.fcntl(self.process.?.stdout.?.handle, std.os.F.SETFL, old_fl | std.os.O.NONBLOCK);
+    self.stdout = try spawnCommand(self.client().config.status_command.ptr);
 
     const source = c.g_source_new(&CommandSource.funcs, @sizeOf(CommandSource)).?;
     const command_source = @fieldParentPtr(CommandSource, "source", source);
     command_source.status_command = self;
-    command_source.tag = c.g_source_add_unix_fd(source, self.process.?.stdout.?.handle, c.G_IO_IN | c.G_IO_ERR | c.G_IO_HUP);
+    command_source.tag = c.g_source_add_unix_fd(source, self.stdout.?.handle, c.G_IO_IN | c.G_IO_ERR | c.G_IO_HUP);
 
     return source;
 }
 
 pub fn deinit(self: *StatusCommand) void {
-    if (self.process_running) {
-        _ = self.process.?.kill() catch |err| {
-            util.warn(@src(), "falied to kill status command: {}", .{err});
-        };
-    }
+    if (self.stdout) |stdout| stdout.close();
     self.status_buffer.deinit(allocator);
     allocator.free(self.status);
 }
 
 fn update(self: *StatusCommand) !void {
     while (true) {
-        const byte = self.process.?.stdout.?.reader().readByte() catch |err| switch (err) {
+        const byte = self.stdout.?.reader().readByte() catch |err| switch (err) {
             error.WouldBlock => return,
             else => |e| return e,
         };

@@ -17,12 +17,11 @@ watcher: ?*c.OrgKdeStatusNotifierWatcher = null,
 items: std.TailQueue(Item) = .{},
 
 pub fn init(self: *Host) void {
-    var name_buf: [std.fmt.count("org.kde.StatusNotifierHost-{}", .{std.math.maxInt(std.os.pid_t)}) + 1]u8 = undefined;
-    const name = std.fmt.bufPrintZ(&name_buf, "org.kde.StatusNotifierHost-{}", .{std.os.linux.getpid()}) catch unreachable;
+    const name = util.arrayPrintZ("org.kde.StatusNotifierHost-{}", .{std.os.linux.getpid()});
 
     self.host_id = c.g_bus_own_name(
         c.G_BUS_TYPE_SESSION,
-        name.ptr,
+        &name,
         c.G_BUS_NAME_OWNER_FLAGS_NONE,
         onBusAcquired,
         null,
@@ -103,12 +102,11 @@ fn onNewProxy(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) ca
 
     self.watcher = watcher;
 
-    var path_buf: [std.fmt.count("/StatusNotifierHost/{}", .{std.math.maxInt(c.guint)}) + 1]u8 = undefined;
-    const path = std.fmt.bufPrintZ(&path_buf, "/StatusNotifierHost/{}", .{self.host_id}) catch unreachable;
+    var path = util.arrayPrintZ("/StatusNotifierHost/{}", .{self.host_id});
 
     c.org_kde_status_notifier_watcher_call_register_status_notifier_host(
         watcher,
-        path.ptr,
+        &path,
         self.cancellable,
         onRegisterHost,
         self,
@@ -131,8 +129,8 @@ fn onRegisterHost(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer
         return;
     }
 
-    _ = g.signalConnect(self.watcher, "status-notifier-item-registered", g.callback(onItemRegistered), self);
-    _ = g.signalConnect(self.watcher, "status-notifier-item-unregistered", g.callback(onItemUnregistered), self);
+    _ = g.signalConnect(self.watcher, "status-notifier-item-registered", onItemRegistered, self);
+    _ = g.signalConnect(self.watcher, "status-notifier-item-unregistered", onItemUnregistered, self);
 
     var items = c.org_kde_status_notifier_watcher_get_registered_status_notifier_items(self.watcher) orelse return;
     while (items[0]) |item| {

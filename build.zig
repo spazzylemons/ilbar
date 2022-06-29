@@ -1,13 +1,13 @@
 const std = @import("std");
 
-fn runCommand(b: *std.build.Builder, argv: []const []const u8) []u8 {
+fn runCommand(allocator: std.mem.Allocator, argv: []const []const u8) []u8 {
     const result = std.ChildProcess.exec(.{
-        .allocator = b.allocator,
+        .allocator = allocator,
         .argv = argv,
     }) catch unreachable;
     // print stderr for error diagnosis
     std.io.getStdErr().writeAll(result.stderr) catch {};
-    b.allocator.free(result.stderr);
+    allocator.free(result.stderr);
     // must exit with code 0
     if (result.term != .Exited or result.term.Exited != 0) {
         std.debug.panic("failed to execute {s}", .{argv[0]});
@@ -17,7 +17,7 @@ fn runCommand(b: *std.build.Builder, argv: []const []const u8) []u8 {
 }
 
 fn pkgConfig(b: *std.build.Builder, obj: *std.build.LibExeObjStep, name: []const u8) void {
-    const result = runCommand(b, &.{ "pkg-config", "--cflags", "--libs", name });
+    const result = runCommand(b.allocator, &.{ "pkg-config", "--cflags", "--libs", name });
     defer b.allocator.free(result);
     var it = std.mem.tokenize(u8, result[0 .. result.len - 1], " ");
     while (it.next()) |slice| {
@@ -29,12 +29,28 @@ fn pkgConfig(b: *std.build.Builder, obj: *std.build.LibExeObjStep, name: []const
     }
 }
 
+fn generateFilesIfNeeded(
+    b: *std.build.Builder,
+    source: []const u8,
+    files: []const []const u8,
+    generator: []const []const u8,
+) !void {
+    const time = (try std.fs.cwd().statFile(source)).mtime;
+    // if source file is newer than generated, or if generated does not exist,
+    // we nede to re-build
+    for (files) |file| {
+        if (std.fs.cwd().statFile(file)) |stat| {
+            if (stat.mtime < time) break;
+        } else |_| break;
+    } else return;
+    b.allocator.free(runCommand(b.allocator, generator));
+}
+
 const WaylandScannerStep = struct {
     step: std.build.Step,
     b: *std.build.Builder,
     src: []const u8,
     dst_c_file: std.build.GeneratedFile,
-    dst_h_file: std.build.GeneratedFile,
 
     fn create(b: *std.build.Builder, src: []const u8) *WaylandScannerStep {
         const self = b.allocator.create(WaylandScannerStep) catch unreachable;
@@ -43,7 +59,6 @@ const WaylandScannerStep = struct {
             .b = b,
             .src = src,
             .dst_c_file = .{ .step = &self.step },
-            .dst_h_file = .{ .step = &self.step },
         };
         return self;
     }
@@ -51,46 +66,27 @@ const WaylandScannerStep = struct {
     fn make(step: *std.build.Step) anyerror!void {
         const self = @fieldParentPtr(WaylandScannerStep, "step", step);
         const xml = self.b.fmt("{s}.xml", .{self.src});
-        const c_file = self.b.fmt("build/{s}-protocol.c", .{std.fs.path.basename(self.src)});
-        const h_file = self.b.fmt("build/{s}-protocol.h", .{std.fs.path.basename(self.src)});
-        const wayland_scanner_full = runCommand(
-            self.b,
-            &.{
-                "pkg-config",
-                "--variable=wayland_scanner",
-                "wayland-scanner",
-            },
-        );
+        const basename = std.fs.path.basename(self.src);
+        const c_file = self.b.fmt("build/{s}-protocol.c", .{basename});
+        const h_file = self.b.fmt("build/{s}-protocol.h", .{basename});
+        const wayland_scanner_full = runCommand(self.b.allocator, &.{ "pkg-config", "--variable=wayland_scanner", "wayland-scanner" });
         defer self.b.allocator.free(wayland_scanner_full);
         const wayland_scanner = wayland_scanner_full[0 .. wayland_scanner_full.len - 1];
-        if (std.fs.cwd().statFile(c_file)) |_| {
-            // file exists, nothing to do
-        } else |_| {
-            self.b.allocator.free(runCommand(
-                self.b,
-                &.{
-                    wayland_scanner,
-                    "private-code",
-                    xml,
-                    c_file,
-                },
-            ));
-        }
+        // generate c file
+        try generateFilesIfNeeded(
+            self.b,
+            xml,
+            &.{c_file},
+            &.{ wayland_scanner, "private-code", xml, c_file },
+        );
         self.dst_c_file.path = c_file;
-        if (std.fs.cwd().statFile(h_file)) |_| {
-            // file exists, nothing to do
-        } else |_| {
-            self.b.allocator.free(runCommand(
-                self.b,
-                &.{
-                    wayland_scanner,
-                    "client-header",
-                    xml,
-                    h_file,
-                },
-            ));
-        }
-        self.dst_h_file.path = h_file;
+        // generate h file
+        try generateFilesIfNeeded(
+            self.b,
+            xml,
+            &.{h_file},
+            &.{ wayland_scanner, "client-header", xml, h_file },
+        );
     }
 };
 
@@ -99,7 +95,6 @@ const GdbusCodegenStep = struct {
     b: *std.build.Builder,
     src: []const u8,
     dst_c_file: std.build.GeneratedFile,
-    dst_h_file: std.build.GeneratedFile,
 
     fn create(b: *std.build.Builder, src: []const u8) *GdbusCodegenStep {
         const self = b.allocator.create(GdbusCodegenStep) catch unreachable;
@@ -108,7 +103,6 @@ const GdbusCodegenStep = struct {
             .b = b,
             .src = src,
             .dst_c_file = .{ .step = &self.step },
-            .dst_h_file = .{ .step = &self.step },
         };
         return self;
     }
@@ -116,36 +110,27 @@ const GdbusCodegenStep = struct {
     fn make(step: *std.build.Step) anyerror!void {
         const self = @fieldParentPtr(WaylandScannerStep, "step", step);
         const xml = self.b.fmt("{s}.xml", .{self.src});
-        const c_file = self.b.fmt("build/{s}.c", .{std.fs.path.basename(self.src)});
-        const h_file = self.b.fmt("build/{s}.h", .{std.fs.path.basename(self.src)});
-        var needs_generation = false;
-        _ = std.fs.cwd().statFile(c_file) catch {
-            needs_generation = true;
-        };
-        _ = std.fs.cwd().statFile(h_file) catch {
-            needs_generation = true;
-        };
-        if (needs_generation) {
-            self.b.allocator.free(runCommand(
-                self.b,
-                &.{
-                    "gdbus-codegen",
-                    "--generate-c-code",
-                    std.fs.path.basename(self.src),
-                    "--output-dir",
-                    "build",
-                    xml,
-                },
-            ));
-        }
+        const basename = std.fs.path.basename(self.src);
+        const c_file = self.b.fmt("build/{s}.c", .{basename});
+        const h_file = self.b.fmt("build/{s}.h", .{basename});
+        try generateFilesIfNeeded(
+            self.b,
+            xml,
+            &.{ c_file, h_file },
+            &.{ "gdbus-codegen", "--generate-c-code", basename, "--output-dir", "build", xml },
+        );
         self.dst_c_file.path = c_file;
-        self.dst_h_file.path = h_file;
     }
 };
 
 pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
+
+    std.fs.cwd().makeDir("build") catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => |e| return e,
+    };
 
     const exe = b.addExecutable("ilbar", "src/main.zig");
     exe.setTarget(target);
@@ -165,11 +150,6 @@ pub fn build(b: *std.build.Builder) !void {
     pkgConfig(b, exe, "gtk+-3.0");
     pkgConfig(b, exe, "gtk-layer-shell-0");
 
-    std.fs.cwd().makeDir("build") catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => |e| return e,
-    };
-
     const scanner = WaylandScannerStep.create(b, "lib/wlr-foreign-toplevel-management-unstable-v1");
     exe.addCSourceFileSource(.{
         .source = .{ .generated = &scanner.dst_c_file },
@@ -181,6 +161,10 @@ pub fn build(b: *std.build.Builder) !void {
         .source = .{ .generated = &codegen.dst_c_file },
         .args = &.{},
     });
+
+    var hash = runCommand(b.allocator, &.{ "git", "rev-parse", "--short", "HEAD" });
+    defer b.allocator.free(hash);
+    exe.defineCMacro("ILBAR_COMMIT_HASH", b.fmt("\"{s}\"", .{hash[0 .. hash.len - 1]}));
 
     exe.install();
 

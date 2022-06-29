@@ -155,13 +155,13 @@ fn putCache(
     if (value) |v| _ = c.cairo_surface_reference(v);
 }
 
-pub fn getIconFromTheme(theme: *c.GtkIconTheme, size: i32, icon_name: [:0]const u8) !*c.cairo_surface_t {
+pub fn getIconFromTheme(theme: *c.GtkIconTheme, size: i32, icon_name: [:0]const u8) !?*c.cairo_surface_t {
     var err: ?*c.GError = null;
     const pixbuf = c.gtk_icon_theme_load_icon(theme, icon_name, size, 0, &err);
     if (err) |e| {
         util.warn(@src(), "failed to load icon: {s}", .{e.message});
         c.g_error_free(e);
-        return error.GtkError;
+        return null;
     }
     errdefer c.g_object_unref(pixbuf);
 
@@ -201,7 +201,14 @@ pub fn getIconFromTheme(theme: *c.GtkIconTheme, size: i32, icon_name: [:0]const 
 }
 
 /// Get an icon as a surface directly from the icon name.
-pub fn getFromIconName(self: *IconManager, size: i32, icon_name: [:0]const u8) !*c.cairo_surface_t {
+pub fn getFromIconName(self: *IconManager, size: i32, icon_name: [:0]const u8) !?*c.cairo_surface_t {
+    if (self.cache.get(.{ .string = icon_name, .kind = .icon_name })) |cached| {
+        if (cached) |surface| {
+            _ = c.cairo_surface_reference(surface);
+        }
+        return cached;
+    }
+
     const result = try getIconFromTheme(self.theme, size, icon_name);
     self.putCache(icon_name, .icon_name, result);
     return result;

@@ -92,6 +92,7 @@ fn findObject(list: ObjectList, name: []const u8, path: []const u8) ?*ObjectList
 
 id: c.guint = undefined,
 watcher: *c.OrgKdeStatusNotifierWatcher = undefined,
+exported: bool = false,
 
 hosts: ObjectList = .{},
 items: ObjectList = .{},
@@ -127,7 +128,8 @@ pub fn deinit(self: *Watcher) void {
         node.data.remove();
     }
     c.g_bus_unown_name(self.id);
-    c.g_dbus_interface_skeleton_unexport(self.watcherSkeleton());
+    if (self.exported) c.g_dbus_interface_skeleton_unexport(self.watcherSkeleton());
+    c.g_object_unref(self.watcher);
 }
 
 fn onBusAcquired(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.gpointer) callconv(.C) void {
@@ -147,20 +149,10 @@ fn onBusAcquired(conn: ?*c.GDBusConnection, name: ?[*:0]const u8, user_data: c.g
         c.g_error_free(e);
         return;
     }
+    self.exported = true;
 
-    _ = g.signalConnect(
-        self.watcher,
-        "handle-register-status-notifier-host",
-        g.callback(onRegisterHost),
-        self,
-    );
-
-    _ = g.signalConnect(
-        self.watcher,
-        "handle-register-status-notifier-item",
-        g.callback(onRegisterItem),
-        self,
-    );
+    _ = g.signalConnect(self.watcher, "handle-register-status-notifier-host", onRegisterHost, self);
+    _ = g.signalConnect(self.watcher, "handle-register-status-notifier-item", onRegisterItem, self);
 }
 
 const NameAndPath = struct { name: [:0]const u8, path: []const u8 };

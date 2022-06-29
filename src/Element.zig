@@ -274,10 +274,12 @@ pub const Text = struct {
     node: std.TailQueue(Element).Node,
     text: [:0]const u8,
 
-    pub fn init(parent: *Element, text: [:0]const u8) !*Text {
+    pub fn init(parent: *Element, text: []const u8) !*Text {
+        const copy = try allocator.dupeZ(u8, text);
+        errdefer allocator.free(copy);
         const self = try allocator.create(Text);
         self.node = .{ .data = .{ .parent = parent, .class = &class } };
-        self.text = text;
+        self.text = copy;
         parent.children.append(&self.node);
         return self;
     }

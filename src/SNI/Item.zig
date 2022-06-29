@@ -15,48 +15,46 @@ name: []const u8,
 path: []const u8,
 
 cancellable: *c.GCancellable,
-item: ?*c.OrgKdeStatusNotifierItem,
-surface: ?*c.cairo_surface_t,
+item: ?*c.OrgKdeStatusNotifierItem = null,
+surface: ?*c.cairo_surface_t = null,
 
-pending_icon_change: bool,
+pending_icon_change: bool = true,
 
-icon_name: ?[*:0]u8,
-icon_pixmap: ?*c.GVariant,
-icon_theme_path: ?[*:0]u8,
-item_is_menu: bool,
-menu_path: ?[*:0]u8,
+icon_name: ?[:0]u8 = null,
+icon_pixmap: ?*c.GVariant = null,
+icon_theme_path: ?[*:0]u8 = null,
+item_is_menu: bool = true,
+menu_path: ?[*:0]u8 = null,
 
-menu: ?*c.GtkMenu,
+menu: ?*c.GtkMenu = null,
 
 pub fn init(self: *Item, client: *Client, service: [*:0]const u8) !void {
-    self.client = client;
+    const service_copy = try allocator.dupe(u8, std.mem.span(service));
+    errdefer allocator.free(service_copy);
 
-    self.service = try allocator.dupe(u8, std.mem.span(service));
-    errdefer allocator.free(self.service);
+    var name: []const u8 = undefined;
+    var path: []const u8 = undefined;
 
-    if (std.mem.indexOfScalar(u8, self.service, '/')) |path_start| {
-        self.name = self.service[0..path_start];
-        self.path = self.service[path_start..];
+    if (std.mem.indexOfScalar(u8, service_copy, '/')) |path_start| {
+        name = service_copy[0..path_start];
+        path = service_copy[path_start..];
     } else {
-        self.name = self.service;
-        self.path = "/StatusNotifierItem";
+        name = service_copy;
+        path = "/StatusNotifierItem";
     }
 
-    const name_z = try allocator.dupeZ(u8, self.name);
+    const name_z = try allocator.dupeZ(u8, name);
     defer allocator.free(name_z);
-    const path_z = try allocator.dupeZ(u8, self.path);
+    const path_z = try allocator.dupeZ(u8, path);
     defer allocator.free(path_z);
 
-    self.cancellable = c.g_cancellable_new();
-    self.item = null;
-    self.surface = null;
-    self.pending_icon_change = true;
-    self.icon_name = null;
-    self.icon_pixmap = null;
-    self.icon_theme_path = null;
-    self.item_is_menu = true;
-    self.menu_path = null;
-    self.menu = null;
+    self.* = .{
+        .client = client,
+        .service = service_copy,
+        .name = name,
+        .path = path,
+        .cancellable = c.g_cancellable_new(),
+    };
 
     c.org_kde_status_notifier_item_proxy_new_for_bus(
         c.G_BUS_TYPE_SESSION,
@@ -71,7 +69,7 @@ pub fn init(self: *Item, client: *Client, service: [*:0]const u8) !void {
 
 pub fn deinit(self: *Item) void {
     if (self.icon_name) |icon_name| {
-        c.g_free(icon_name);
+        c.g_free(icon_name.ptr);
     }
     if (self.icon_pixmap) |icon_pixmap| {
         c.g_variant_unref(icon_pixmap);
@@ -110,12 +108,7 @@ fn onNewProxy(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointer) ca
 
     self.item = item;
 
-    _ = g.signalConnect(
-        item,
-        "new-icon",
-        g.callback(onNewIcon),
-        self,
-    );
+    _ = g.signalConnect(item, "new-icon", onNewIcon, self);
 
     self.updateProperties();
 }
@@ -128,10 +121,10 @@ fn getIconFromIconName(self: *Item) !?*c.cairo_surface_t {
         const theme = c.gtk_icon_theme_new().?;
         defer c.g_object_unref(theme);
         c.gtk_icon_theme_append_search_path(theme, icon_theme_path);
-        return try IconManager.getIconFromTheme(theme, self.client.config.icon_size, std.mem.span(icon_name));
+        return try IconManager.getIconFromTheme(theme, self.client.config.icon_size, icon_name);
     }
     // otherwise, use the default theme
-    return try self.client.icons.getFromIconName(self.client.config.icon_size, std.mem.span(icon_name));
+    return try self.client.icons.getFromIconName(self.client.config.icon_size, icon_name);
 }
 
 fn getIconFromPixmap(self: *Item) !?*c.cairo_surface_t {
@@ -294,9 +287,11 @@ fn onPropertiesGet(src: ?*c.GObject, res: ?*c.GAsyncResult, user_data: c.gpointe
 
         if (std.mem.eql(u8, key_span, "IconName")) {
             if (self.icon_name) |icon_name| {
-                c.g_free(icon_name);
+                c.g_free(icon_name.ptr);
             }
-            c.g_variant_get(value, "s", &self.icon_name);
+            var icon_name: ?[*:0]u8 = null;
+            c.g_variant_get(value, "s", &icon_name);
+            self.icon_name = std.mem.span(icon_name);
         } else if (std.mem.eql(u8, key_span, "IconPixmap")) {
             if (self.icon_pixmap) |icon_pixmap| {
                 c.g_variant_unref(icon_pixmap);
